@@ -46,3 +46,21 @@ export const TRANSCRIBE = {
 };
 
 export const SERVICES = { llm: LLM, image: IMAGE, speech: SPEECH, transcribe: TRANSCRIBE };
+
+/** Providers whose key is saved once and shared by every service that uses them. */
+export const KEYS = {
+  openai: { name: 'OpenAI', url: 'https://platform.openai.com/api-keys', uses: 'chat agent, images, voice, transcripts' },
+  anthropic: { name: 'Anthropic', url: 'https://console.anthropic.com/settings/keys', uses: 'chat agent' },
+  gemini: { name: 'Google Gemini', url: 'https://aistudio.google.com/apikey', uses: 'chat agent, images' },
+  openrouter: { name: 'OpenRouter', url: 'https://openrouter.ai/keys', uses: 'chat agent (many models)' },
+  elevenlabs: { name: 'ElevenLabs', url: 'https://elevenlabs.io/app/settings/api-keys', uses: 'voice' },
+  groq: { name: 'Groq', url: 'https://console.groq.com/keys', uses: 'transcripts' },
+};
+
+/** One-line descriptions shown on the choice cards in AI settings. */
+export const NOTES = {
+  llm: { anthropic: 'Claude models. Strong at editing and checking its work.', openai: 'GPT models from OpenAI.', openrouter: 'One key, hundreds of models.', gemini: 'Google Gemini models.', ollama: 'Runs on this computer. Free, needs Ollama installed.', custom: 'Any server that speaks the OpenAI API.' },
+  image: { openai: 'Good all-round images and text in images.', gemini: 'Fast, good for photos and edits.', custom: 'Any server that speaks the OpenAI images API.' },
+  speech: { openai: 'Natural voices, many languages.', elevenlabs: 'The most natural voices.', piper: 'Offline and free. Needs a voice file.', espeak: 'Offline and free. Sounds robotic, fine for drafts.', custom: 'Any server that speaks the OpenAI speech API.' },
+  transcribe: { openai: 'Whisper: accurate, many languages.', groq: 'Whisper, very fast and cheap.', custom: 'Any server that speaks the OpenAI transcription API.' },
+};

@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AGENTS, SERVICES } from '../shared/providers.js';
+import { AGENTS, SERVICES, KEYS } from '../shared/providers.js';
 
 export function settingsFile() {
   if (process.env.KADR_CONFIG) return path.resolve(process.env.KADR_CONFIG);
@@ -14,7 +14,7 @@ export function settingsFile() {
   return path.join(base, 'kadr', 'settings.json');
 }
 
-const DEFAULTS = { agent: 'claude', llm: { provider: 'anthropic' }, image: {}, speech: {}, transcribe: {} };
+const DEFAULTS = { agent: 'claude', keys: {}, llm: { provider: 'anthropic' }, image: {}, speech: {}, transcribe: {} };
 
 // Environment keys used when a service has no key saved.
 const ENV_KEYS = {
@@ -27,6 +27,12 @@ export function loadSettings() {
   try { s = JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) || {}; } catch { /* first run */ }
   const out = { ...DEFAULTS, ...s };
   for (const k of Object.keys(SERVICES)) out[k] = { ...(DEFAULTS[k] || {}), ...(s[k] || {}) };
+  out.keys = { ...(s.keys || {}) };
+  // Older settings kept a key per service: share it per provider instead.
+  for (const k of Object.keys(SERVICES)) {
+    const c = out[k];
+    if (c.key && KEYS[c.provider]) { if (!out.keys[c.provider]) out.keys[c.provider] = c.key; delete c.key; }
+  }
   if (!AGENTS[out.agent]) out.agent = 'claude';
   return out;
 }
@@ -45,7 +51,7 @@ export function service(s, kind) {
   const cat = SERVICES[kind];
   const p = cat?.[cfg.provider];
   if (!p) return null;
-  const key = cfg.key || (ENV_KEYS[cfg.provider] || []).map((e) => process.env[e]).find(Boolean) || '';
+  const key = keyFor(s, cfg.provider) || cfg.key || '';
   return {
     provider: cfg.provider, kind: p.kind, name: p.name, bin: p.bin,
     baseUrl: String(cfg.baseUrl || p.baseUrl || '').replace(/\/+$/, ''),
@@ -53,11 +59,17 @@ export function service(s, kind) {
   };
 }
 
+/** The key for a provider: saved, else from the environment. */
+export function keyFor(s, provider) {
+  return (KEYS[provider] && s.keys?.[provider]) || (ENV_KEYS[provider] || []).map((e) => process.env[e]).find(Boolean) || '';
+}
+
 const mask = (k) => (k ? `••••${String(k).slice(-4)}` : '');
 
 /** What the browser may see: everything except the keys themselves. */
 export function publicSettings(s) {
-  const out = { agent: s.agent, file: settingsFile() };
+  const out = { agent: s.agent, file: settingsFile(), keys: {} };
+  for (const p of Object.keys(KEYS)) out.keys[p] = { saved: mask(s.keys?.[p]), env: !s.keys?.[p] && !!keyFor(s, p) };
   for (const k of Object.keys(SERVICES)) {
     const { key, ...rest } = s[k] || {};
     const r = service(s, k);
@@ -70,6 +82,12 @@ export function publicSettings(s) {
 export function mergeSettings(cur, patch) {
   const next = { ...cur };
   if (patch.agent && AGENTS[patch.agent]) next.agent = patch.agent;
+  next.keys = { ...(cur.keys || {}) };
+  for (const [p, v] of Object.entries(patch.keys || {})) {
+    if (!KEYS[p]) throw new Error(`unknown provider: ${p}`);
+    if (v === null || v === '') delete next.keys[p];
+    else if (typeof v === 'string') next.keys[p] = v.trim();
+  }
   for (const k of Object.keys(SERVICES)) {
     const p = patch[k];
     if (!p || typeof p !== 'object') continue;
@@ -80,9 +98,45 @@ export function mergeSettings(cur, patch) {
       c.provider = p.provider || undefined;
     }
     for (const f of ['model', 'baseUrl', 'voice']) if (typeof p[f] === 'string') c[f] = p[f].trim() || undefined;
-    if (typeof p.key === 'string' && p.key.trim()) c.key = p.key.trim();
-    if (p.clearKey) delete c.key;
+    if (typeof p.key === 'string' && p.key.trim()) {
+      if (KEYS[c.provider]) next.keys[c.provider] = p.key.trim(); else c.key = p.key.trim();
+    }
+    if (p.clearKey) { delete c.key; if (KEYS[c.provider]) delete next.keys[c.provider]; }
     next[k] = JSON.parse(JSON.stringify(c));
   }
   return next;
+}
+
+/** Check a key with a cheap, free request. Returns { ok, message }. */
+export async function testKey(provider, key, baseUrl) {
+  if (!key) return { ok: false, message: 'no key saved' };
+  const get = async (url, headers) => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 12000);
+    try {
+      const r = await fetch(url, { headers, signal: ac.signal });
+      const body = await r.text();
+      return { status: r.status, body };
+    } catch (e) {
+      return { status: 0, body: e.name === 'AbortError' ? 'timed out' : (e.cause?.code || e.message) };
+    } finally { clearTimeout(timer); }
+  };
+  const bearer = { authorization: `Bearer ${key}` };
+  const url = {
+    anthropic: ['https://api.anthropic.com/v1/models', { 'x-api-key': key, 'anthropic-version': '2026-10-21' }],
+    openai: ['https://api.openai.com/v1/models', bearer],
+    gemini: ['https://generativelanguage.googleapis.com/v1beta/openai/models', bearer],
+    openrouter: ['https://openrouter.ai/api/v1/key', bearer],
+    groq: ['https://api.groq.com/openai/v1/models', bearer],
+    elevenlabs: ['https://api.elevenlabs.io/v1/user', { 'xi-api-key': key }],
+    custom: [`${String(baseUrl || '').replace(/\/+$/, '')}/models`, bearer],
+  }[provider];
+  if (!url || !url[0].startsWith('http')) return { ok: false, message: 'cannot test this one' };
+  const r = await get(...url);
+  if (r.status >= 200 && r.status < 300) return { ok: true, message: 'the key works' };
+  // A key limited to some features can't read the account but is still valid.
+  if (provider === 'elevenlabs' && r.status === 401 && /permission/i.test(r.body)) return { ok: true, message: 'the key works (limited permissions)' };
+  if (r.status === 0) return { ok: false, message: `cannot reach the service (${r.body})` };
+  if (r.status === 401 || r.status === 403) return { ok: false, message: 'the key was rejected' };
+  return { ok: false, message: `the service answered ${r.status}` };
 }

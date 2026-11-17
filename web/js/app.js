@@ -16,6 +16,7 @@ import { ART } from './art.js';
 import './compedit.js';
 import { splitAtPlayhead, deleteSelected, duplicateSelected, addMarker, addTrack, copySelected, paste, nudge, rippleTrim, jumpKey, clipById, isLocked } from './ops.js';
 import { toggleGuides } from './viewer.js';
+import { initMenubar } from './menubar.js';
 
 // ---------- loading ----------
 async function loadMedia() {
@@ -193,7 +194,9 @@ $('#projBtn').onclick = openProjects;
 $('#templatesBtn').onclick = openGallery;
 // start screen (empty project)
 $('#startArt').innerHTML = ART.stage();
-$('#startImport').onclick = () => { const inp = h('input', { type: 'file', multiple: true, accept: 'video/*,audio/*,image/*,.html' }); inp.onchange = () => importFiles([...inp.files]); inp.click(); };
+function importDialog() { const inp = h('input', { type: 'file', multiple: true, accept: 'video/*,audio/*,image/*,.html' }); inp.onchange = () => importFiles([...inp.files]); inp.click(); }
+$('#startImport').onclick = importDialog;
+initMenubar({ setTab, importDialog });
 $('#startTemplates').onclick = openGallery;
 $('#startChat').onclick = () => setTab('chat');
 $('#splitBtn').onclick = splitAtPlayhead;
@@ -267,6 +270,7 @@ window.addEventListener('keydown', (e) => {
   if (mod && k.toLowerCase() === 'k') { stop(); return splitAtPlayhead(); }
   if (mod && k.toLowerCase() === 'e') { stop(); return openExport(); }
   if (mod && k.toLowerCase() === 'o') { stop(); return openProjects(); }
+  if (mod && k.toLowerCase() === 'i') { stop(); return importDialog(); }
   if (mod) return;
   if (e.altKey && (k === 'ArrowLeft' || k === 'ArrowRight')) { stop(); return nudge((k === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1)); }
   switch (k) {

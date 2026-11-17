@@ -9,7 +9,8 @@ import { Media } from './media.js';
 import { renderProject } from './render.js';
 import { findChrome } from './chrome.js';
 import { AgentBridge, which } from './agent.js';
-import { loadSettings, saveSettings, publicSettings, mergeSettings } from './settings.js';
+import { genImage, genSpeech } from './gen.js';
+import { loadSettings, saveSettings, publicSettings, mergeSettings, keyFor, testKey } from './settings.js';
 import { probe } from './media.js';
 import { findRoot } from './project.js';
 import { initProject } from './init.js';
@@ -353,6 +354,21 @@ export async function startServer({ root: startRoot, port = 4310, host = '127.0.
       return res.end();
     }
     if (p === '/api/settings' && m === 'GET') return json(res, 200, { ...publicSettings(loadSettings()), agents: agent.info().agents, local: { piper: !!which('piper'), espeak: !!which('espeak-ng') } });
+    if (p === '/api/gen' && m === 'POST') {
+      const b = JSON.parse(await readBody(req, 2e4));
+      let file;
+      if (b.kind === 'image') file = await genImage(root, String(b.prompt || '').trim() || 'abstract background', { size: b.size || '1536x1024' });
+      else if (b.kind === 'speech') file = await genSpeech(root, String(b.text || '').trim(), { voice: b.voice || undefined });
+      else throw Object.assign(new Error('unknown kind'), { status: 400 });
+      broadcast({ type: 'media' });
+      return json(res, 200, { path: path.relative(root, file) });
+    }
+    if (p === '/api/settings/test' && m === 'POST') {
+      const b = JSON.parse(await readBody(req, 4e3));
+      const st = loadSettings();
+      const key = b.provider === 'custom' ? st[b.kind]?.key : keyFor(st, b.provider);
+      return json(res, 200, await testKey(b.provider, key, b.provider === 'custom' ? st[b.kind]?.baseUrl : undefined));
+    }
     if (p === '/api/settings' && m === 'POST') {
       if (agent.proc) throw Object.assign(new Error('wait for the chat agent to finish first'), { status: 409 });
       const next = mergeSettings(loadSettings(), JSON.parse(await readBody(req, 2e4)));

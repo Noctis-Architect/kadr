@@ -244,6 +244,15 @@ export async function loadChat() {
 
 export function focusChat() { setTimeout(() => ta.focus(), 50); }
 
+/** Put a request in the chat box (not sent) so the user can finish or send it. */
+export function askChat(text) {
+  ta.value = text;
+  autosize();
+  paintControls();
+  setTimeout(() => { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 60);
+}
+export { openAiSettings };
+
 // ---------- live events from the server ----------
 on('agent', (e) => {
   const find = (id) => msgs.find((m) => m.id === id);
