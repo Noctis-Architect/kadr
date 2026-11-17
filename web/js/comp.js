@@ -1,7 +1,7 @@
 // Composition sources the editor has read: scanned model + parts, kept fresh when
 // the file changes on disk (an agent edited it) and written back with minimal edits.
 import { scanComp, partsOf, applyEdits } from '/shared/htmlsrc.js';
-import { on, emit, toast } from './state.js';
+import { on, emit, toast, commit } from './state.js';
 import { api } from './util.js';
 
 const cache = new Map(); // src -> { source, hash, model, parts, readonly, undo: [] }
@@ -47,6 +47,29 @@ export async function writeComp(src, next, { undo = true } = {}) {
     getComp(src);
     return false;
   }
+}
+
+/** Load (or reload) src now and return its entry. */
+export async function fetchComp(src) {
+  await load(src);
+  return cache.get(src) || null;
+}
+
+/**
+ * Edit a clip's composition. A built-in template can't change, so the first edit
+ * makes an editable copy in comps/, points the clip at it and applies the edit
+ * there (the copy is byte-identical, so the same ranges apply).
+ */
+export async function editClipComp(c, edits) {
+  const e = cache.get(c.src);
+  if (!e?.readonly) return editComp(c.src, edits);
+  try {
+    const r = await api('/api/comp/copy', { src: c.src });
+    commit(() => { c.src = r.path; });
+    toast(`Made an editable copy: ${r.path}`);
+    await fetchComp(r.path);
+    return editComp(r.path, edits);
+  } catch (err) { toast(err.message, true); return false; }
 }
 
 export const editComp = (src, edits) => {

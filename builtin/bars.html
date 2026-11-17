@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="kadr:duration" content="5">
+<meta name="kadr:category" content="Data">
+<meta name="kadr:description" content="Bar chart: bars grow one after another with their values counting up. labels and values are comma-separated lists; the biggest bar gets the accent color.">
+<meta name="kadr:props" content='{"title":"Weekly views","labels":"Mon,Tue,Wed,Thu,Fri","values":"12,19,8,24,16","unit":"k","accent":"#e8ff59","color":"#f5f5f0"}'>
+<title>Bar chart</title>
+<style>
+  :root { --accent: #e8ff59; --color: #f5f5f0; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  body { font-family: system-ui, "Vazirmatn", sans-serif; color: var(--color); }
+  .chart { position: absolute; left: 12%; right: 12%; top: 16%; bottom: 14%; display: grid; grid-template-rows: auto 1fr; animation: leave .5s cubic-bezier(.7, 0, .84, 0) 4.5s both; }
+  .title { font-size: 64px; font-weight: 800; letter-spacing: -.02em; animation: rise .8s cubic-bezier(.16, 1, .3, 1) .1s both; }
+  .plot { position: relative; display: flex; align-items: flex-end; gap: 4%; margin-top: 60px; border-bottom: 3px solid rgba(255, 255, 255, .25); }
+  .axis { animation: fade .6s ease-out .2s both; }
+  .col { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; position: relative; }
+  .bar { width: 100%; border-radius: 14px 14px 0 0; background: rgba(255, 255, 255, .28); transform-origin: bottom; animation: grow 1s cubic-bezier(.16, 1, .3, 1) .5s both; }
+  .bar.top { background: var(--accent); }
+  .val { font-size: 40px; font-weight: 800; margin-bottom: 14px; font-variant-numeric: tabular-nums; }
+  .lab { position: absolute; bottom: -62px; font-size: 30px; opacity: .6; }
+  @keyframes rise { from { opacity: 0; transform: translateY(30px); } }
+  @keyframes fade { from { opacity: 0; } }
+  @keyframes grow { from { transform: scaleY(0); } }
+  @keyframes leave { to { opacity: 0; } }
+</style>
+</head>
+<body>
+  <div class="chart">
+    <div class="title" data-part="Title" data-prop="title" dir="auto">Weekly views</div>
+    <div class="plot axis" id="plot" data-part="Bars"></div>
+  </div>
+<script>
+  const STAGGER = 0.12; // seconds between bars
+  // fallbacks = the defaults in kadr:props (a clip without props still gets a chart)
+  const labels = String(kadr.prop('labels', 'Mon,Tue,Wed,Thu,Fri')).split(',').map((s) => s.trim());
+  const values = String(kadr.prop('values', '12,19,8,24,16')).split(',').map(Number).filter((v) => Number.isFinite(v));
+  const unit = kadr.prop('unit', 'k');
+  const max = Math.max(1, ...values);
+  const plot = document.getElementById('plot');
+  const counters = [];
+  values.forEach((v, i) => {
+    const col = document.createElement('div');
+    col.className = 'col';
+    col.innerHTML = '<div class="val"></div><div class="bar"></div><div class="lab"></div>';
+    col.querySelector('.lab').textContent = labels[i] || '';
+    const bar = col.querySelector('.bar');
+    bar.style.height = `${(v / max) * 78}%`;
+    if (v === max) bar.classList.add('top');
+    plot.append(col);
+    // the .bar rule's delay (editable in the GUI) is the first bar; the rest follow it
+    const base = parseFloat(getComputedStyle(bar).animationDelay) || 0;
+    const len = parseFloat(getComputedStyle(bar).animationDuration) || 1;
+    bar.style.animationDelay = `${base + i * STAGGER}s`;
+    counters.push({ el: col.querySelector('.val'), v, a: base + i * STAGGER, b: base + i * STAGGER + len });
+  });
+  kadr.onFrame((t) => {
+    for (const c of counters) {
+      const p = kadr.progressIn(t, c.a, c.b, 'outCubic');
+      c.el.textContent = `${Math.round(c.v * p)}${unit}`;
+      c.el.style.opacity = Math.min(1, p * 3);
+    }
+  });
+</script>
+</body>
+</html>

@@ -44,6 +44,11 @@ export const ICON = {
   folder: '<path d="M2 4.5A1.5 1.5 0 0 1 3.5 3H6l1.5 1.5h5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/>',
   trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
   lock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>',
+  spark: '<path d="M8 1.8 9.3 6.7 14.2 8 9.3 9.3 8 14.2 6.7 9.3 1.8 8 6.7 6.7z"/>',
+  layout: '<rect x="2" y="2.5" width="12" height="11" rx="2"/><path d="M2 6.5h12M6.5 6.5v7"/>',
+  upload: '<path d="M8 10.5V2.5M5 5.5l3-3 3 3M3 10v2a1.5 1.5 0 0 0 1.5 1.5h7A1.5 1.5 0 0 0 13 12v-2"/>',
+  chat: '<path d="M3 3.5h10a1.5 1.5 0 0 1 1.5 1.5v5A1.5 1.5 0 0 1 13 11.5H8l-3 2.5v-2.5H3A1.5 1.5 0 0 1 1.5 10V5A1.5 1.5 0 0 1 3 3.5z"/>',
+  arrow: '<path d="M3 8h10M9 4l4 4-4 4"/>',
   unlock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 4.9-.7"/>',
 };
 
@@ -72,6 +77,8 @@ export function clipName(c) {
     const main = c.props?.text || c.props?.title || c.props?.name;
     return `${t?.title || basename(c.src)}${main ? ` · ${String(main).split('\n')[0].replace(/\*/g, '')}` : ''}`;
   }
+  // a composition: its <title> reads better than the file name
+  if (c.type === 'html') { const t = S.media.get(c.src)?.title; if (t) return t; }
   return basename(c.src);
 }
 

@@ -2,6 +2,7 @@
 // (server side: src/agent.js). The agent edits the same files the editor shows,
 // so the preview updates while it works.
 import { tc, clipEnd } from '/shared/model.js';
+import { ART } from './art.js';
 import { S, on, emit, duration, toast } from './state.js';
 import { $, h, svg, api } from './util.js';
 import { clipById } from './ops.js';
@@ -150,6 +151,7 @@ function renderAll() {
   }
   if (!msgs.length) {
     log.replaceChildren(h('div.chat-empty', {},
+      h('div.empty-art', { html: ART.chat() }),
       h('h5', {}, 'Edit by describing it'),
       h('p', {}, 'Claude Code works on this project\'s files with your own account. You see every change live, and each turn can be undone.'),
       h('div.chips', {}, ...SUGGEST.map((s) => h('button.chip', { dir: 'rtl', on: { click: () => { ta.value = s; autosize(); ta.focus(); paintControls(); } } }, s)))));

@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="kadr:duration" content="6">
+<meta name="kadr:category" content="Text">
+<meta name="kadr:description" content="Quote card: a big quotation mark, the quote rising line by line, and the author. Leave bg empty to sit over footage.">
+<meta name="kadr:props" content='{"quote":"Simplicity is the ultimate sophistication.","author":"Leonardo da Vinci","accent":"#e8ff59","color":"#f5f5f0","bg":""}'>
+<title>Quote</title>
+<style>
+  :root { --accent: #e8ff59; --color: #f5f5f0; --bg: transparent; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  body { font-family: Georgia, "Times New Roman", "Vazirmatn", "Noto Naskh Arabic", serif; color: var(--color); display: grid; place-items: center; }
+  .bg { position: absolute; inset: 0; background: var(--bg); animation: fade .6s ease-out 0s both; }
+  .card { position: relative; width: 74%; animation: leave .6s cubic-bezier(.7, 0, .84, 0) 5.4s both; }
+  .mark { position: absolute; left: -.55em; top: -.42em; font-size: 260px; line-height: 1; color: var(--accent); animation: pop .9s cubic-bezier(.34, 1.56, .64, 1) .1s both; }
+  .mask { overflow: hidden; padding-bottom: .1em; }
+  .quote { margin: 0; font-size: 84px; line-height: 1.18; font-weight: 400; letter-spacing: -.01em; animation: rise 1.1s cubic-bezier(.16, 1, .3, 1) .35s both; }
+  .rule { width: 90px; height: 4px; margin: 46px 0 22px; background: var(--accent); transform-origin: left; animation: grow .7s cubic-bezier(.16, 1, .3, 1) 1.2s both; }
+  .author { font-family: system-ui, sans-serif; font-size: 34px; font-weight: 600; letter-spacing: .04em; opacity: .8; animation: slide .8s cubic-bezier(.16, 1, .3, 1) 1.35s both; }
+  @keyframes fade { from { opacity: 0; } }
+  @keyframes pop { from { opacity: 0; transform: scale(.4) rotate(-12deg); } }
+  @keyframes rise { from { transform: translateY(105%); } }
+  @keyframes grow { from { transform: scaleX(0); } }
+  @keyframes slide { from { opacity: 0; transform: translateX(-30px); } }
+  @keyframes leave { to { opacity: 0; transform: translateY(-20px); } }
+</style>
+</head>
+<body>
+  <div class="bg" data-part="Background"></div>
+  <div class="card">
+    <div class="mark" data-part="Quote mark">“</div>
+    <div class="mask"><p class="quote" data-part="Quote" data-prop="quote" dir="auto">Simplicity is the ultimate sophistication.</p></div>
+    <div class="rule" data-part="Line"></div>
+    <div class="author" data-part="Author" data-prop="author" dir="auto">Leonardo da Vinci</div>
+  </div>
+</body>
+</html>

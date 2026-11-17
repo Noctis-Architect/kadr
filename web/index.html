@@ -9,13 +9,14 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand" title="kadr"><span class="mark"></span></div>
+  <div class="brand" title="kadr"><svg viewBox="0 0 32 32" class="logo"><path d="M7 7v18M25 7v18M7 7h5M7 25h5M25 7h-5M25 25h-5" stroke="#e8ff59" stroke-width="2.6" fill="none" stroke-linecap="round"/><path d="M13.5 11.5v9l7-4.5z" fill="#e8ff59"/></svg><span class="word">kadr</span></div>
   <button class="proj-btn" id="projBtn" title="Projects: recent, open, new  Ctrl+O"><span class="proj" id="projName">—</span><svg viewBox="0 0 16 16"><path d="m4.5 6.5 3.5 3.5 3.5-3.5"/></svg></button>
   <div class="status" id="status"><span class="dot"></span><span class="st-text"></span></div>
   <div class="grow"></div>
   <div class="pills" id="pills"></div>
   <button class="btn ghost icon" id="undoBtn" title="Undo  Ctrl+Z"><svg viewBox="0 0 16 16"><path d="M6 4 3 7l3 3M3.5 7H10a3 3 0 0 1 0 6H8"/></svg></button>
   <button class="btn ghost icon" id="redoBtn" title="Redo  Ctrl+Shift+Z"><svg viewBox="0 0 16 16"><path d="m10 4 3 3-3 3m2.5-3H6a3 3 0 0 0 0 6h2"/></svg></button>
+  <button class="btn ghost" id="templatesBtn" title="Templates gallery"><svg viewBox="0 0 16 16"><path d="M8 1.8 9.3 6.7 14.2 8 9.3 9.3 8 14.2 6.7 9.3 1.8 8 6.7 6.7z"/></svg><span>Templates</span></button>
   <button class="btn primary" id="exportBtn"><span>Export</span></button>
 </header>
 
@@ -25,7 +26,18 @@
     <div class="stage-wrap" id="stageWrap">
       <div class="stage" id="stage"></div>
       <div class="stage-overlay" id="stageOverlay"></div>
-      <div class="stage-empty" id="stageEmpty"><div><b>Start with footage</b><span>Drop video, audio or images anywhere, or ask the chat to build something.</span></div></div>
+      <div class="stage-empty" id="stageEmpty">
+        <div class="start">
+          <div class="start-art" id="startArt"></div>
+          <b>Let's make a video</b>
+          <span>Bring your footage, start from a template, or just describe it.</span>
+          <div class="start-actions">
+            <button class="start-card" id="startImport"><i class="si si-media"></i><b>Import media</b><small>Video, audio, images. Or drop them anywhere.</small></button>
+            <button class="start-card" id="startTemplates"><i class="si si-tpl"></i><b>Templates</b><small>Titles, captions, charts, logo reveals…</small></button>
+            <button class="start-card" id="startChat"><i class="si si-chat"></i><b>Describe it</b><small>Claude Code builds it in this project.</small></button>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="transport">
       <div class="tc" id="tcNow">00:00:00:00</div>

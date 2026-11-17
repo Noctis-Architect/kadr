@@ -181,6 +181,8 @@ plus a one-line `<meta name="kadr:description" content="...">`.
 - `<h1 data-prop="title">fallback</h1>` gets its text filled in automatically
 - `<img data-prop-src="logo">` gets its src set
 - every primitive prop is also a CSS variable on `:root`: `var(--accent)`
+Props missing on a clip fall back to the defaults in `kadr:props` (also for
+`kadr.prop()`), so keep those defaults complete and meaningful.
 Make comps reusable through props rather than copying files.
 
 ### Keep comps editable in the GUI (the user edits them too)
@@ -236,6 +238,12 @@ Ready-made, polished compositions you can use as `src` without copying them.
 - `@kadr/wipe.html`: transition. Put it on the top track centered on a cut
   (`start = cut - duration/2`); it covers the frame fully at its midpoint
 - `@kadr/end-card.html`: end card / call to action
+- `@kadr/quote.html`: quote card (quote, author)
+- `@kadr/logo-reveal.html`: logo reveal; `logo` is an image path (`/p/media/logo.png`), empty for a monogram
+- `@kadr/subscribe.html`: subscribe button that gets clicked, with a bell
+- `@kadr/bars.html`: bar chart; `labels` and `values` are comma-separated lists
+- `@kadr/countdown.html`: 3-2-1 countdown (one number per second, `from`)
+- `@kadr/callout.html`: circle + arrow + label pointing at `x`,`y` (percent of the frame)
 Check one with `kadr comp @kadr/kinetic.html`. To customize beyond its props, copy
 the file into `comps/` and edit it there.
 

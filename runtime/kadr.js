@@ -46,7 +46,22 @@
     return origError.apply(console, arguments);
   };
 
+  // Defaults declared in <meta name="kadr:props">: a clip without props (or
+  // with only some) still gets every value. The meta is parsed after this
+  // script runs, so they are merged in on first use.
+  var defaultsMerged = false;
+  function mergeDefaults() {
+    if (defaultsMerged) return;
+    var m = document.querySelector('meta[name="kadr:props"]');
+    if (!m) { if (document.readyState !== 'loading') defaultsMerged = true; return; }
+    defaultsMerged = true;
+    var d = {};
+    try { d = JSON.parse(m.getAttribute('content') || '{}') || {}; } catch (e) { d = {}; }
+    Object.keys(d).forEach(function (k) { if (props[k] == null) props[k] = d[k]; });
+  }
+
   function applyProps() {
+    mergeDefaults();
     var root = document.documentElement;
     Object.keys(props).forEach(function (k) {
       var v = props[k];
@@ -103,7 +118,7 @@
 
   var kadr = {
     version: 1,
-    props: props,
+    get props() { mergeDefaults(); return props; },
     rendering: rendering,
     get time() { return time; },
     get duration() { var d = parseFloat(meta('duration')); return isFinite(d) && d > 0 ? d : null; },
@@ -112,7 +127,7 @@
     get height() { return window.innerHeight; },
 
     /** Read a prop with a fallback: kadr.prop('title', 'Hello'). */
-    prop: function (name, fallback) { return props[name] != null ? props[name] : fallback; },
+    prop: function (name, fallback) { mergeDefaults(); return props[name] != null ? props[name] : fallback; },
 
     /** Run fn(t, kadr) on every frame. Returns an unsubscribe function. */
     onFrame: function (fn) {

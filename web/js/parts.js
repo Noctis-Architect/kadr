@@ -7,7 +7,7 @@
 import { decodeEnt, escText, escAttr, styleEdit, styleUrls, attrEdit, ruleDecl, partTimeEdits, animEdits, jsEdits, animEaseEdit, jsEaseEdit, relPath, resolvePath, IMG_RE } from '/shared/htmlsrc.js';
 import { S, on, emit, commit, seek, toast, publishState } from './state.js';
 import { $, h, svg, ICON, drag, clipName, basename } from './util.js';
-import { getComp, editComp, undoComp } from './comp.js';
+import { getComp, editClipComp, undoComp } from './comp.js';
 import { openCompEditor, textInput, numInput, colorInput } from './compedit.js';
 import { pickImage } from './picker.js';
 
@@ -55,7 +55,7 @@ export function renderParts() {
     head(h('span.pt-k', {}, 'parts'), h('div.nm', { title: c.src }, clipName(c))),
     h('div.tl-lane', {}, band(), h('div.pt-hint', { style: { left: `${c.start * pps + 8}px` } },
       !e ? 'reading…' : e.parts.length ? `${e.parts.length} part${e.parts.length === 1 ? '' : 's'} · drag to move · drag the right edge to speed up or slow down · click to edit` : 'No animated parts found in this composition',
-      e?.readonly ? ' · built-in (read-only)' : '',
+      e?.readonly ? ' · built-in: your first change makes an editable copy in comps/' : '',
       h('button.btn.ghost.sm', { on: { click: () => openCompEditor(c.src, c.id) } }, 'Open editor'))));
   if (!e) { box.replaceChildren(title); return; }
   const rows = e.parts.map((p) => {
@@ -96,9 +96,8 @@ function dragPart(ev, c, e, p, bar) {
   }, (_u, moved) => {
     if (!moved) { selectPart(c, p.key); seek(toT(c, p.s)); return; }
     bar.style.width = `${w0}px`;
-    if (e.readonly) { toast('Built-in templates are read-only: open the editor and make an editable copy', true); renderParts(); return; }
     S.part = { clip: c.id, key: p.key };
-    editComp(c.src, partTimeEdits(p, s, len));
+    editClipComp(c, partTimeEdits(p, s, len));
   });
 }
 
@@ -132,7 +131,7 @@ export function partView() {
   const src = e.source;
   const el = p.el;
   const out = [];
-  const edit = (...x) => editComp(c.src, x);
+  const edit = (...x) => editClipComp(c, x);
   const builtin = c.src.startsWith('@kadr/');
   const dir = builtin ? '' : c.src.split('/').slice(0, -1).join('/');
   const props = { ...e.model.props, ...(c.props || {}) };

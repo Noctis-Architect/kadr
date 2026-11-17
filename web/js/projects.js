@@ -2,6 +2,7 @@
 // Opening switches the server to the other project, then every editor tab reloads.
 import { S, flushSave, toast } from './state.js';
 import { $, h, svg, ICON, api, fmtDur } from './util.js';
+import { poster } from './art.js';
 
 const back = $('#modal');
 let open = false;
@@ -56,7 +57,7 @@ export async function openProjects() {
       const [w, hh] = [x.width || 16, x.height || 9];
       const th = h('div.pj-th', { style: { aspectRatio: `${w} / ${hh}` } });
       if (x.thumb) th.style.backgroundImage = `url("/api/recent/thumb?path=${encodeURIComponent(x.path)}&v=${x.modified || 0}")`;
-      else th.append(h('span', {}, (x.name || '?').slice(0, 1).toUpperCase()));
+      else th.innerHTML = poster(x.name, `${w} / ${hh}`);
       const forget = h('button.pj-x', { title: 'Remove from this list (the files stay)', on: { click: async (e) => {
         e.stopPropagation();
         await api('/api/recent/forget', { path: x.path }).catch(() => {});

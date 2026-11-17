@@ -130,7 +130,7 @@ export function render() {
         commit(() => { trackById(t.id).locked = !t.locked; });
         if (!t.locked) select([...S.sel].filter((id) => clipById(id)?.track !== t.id));
       } } }, svg(t.locked ? ICON.lock : ICON.unlock)));
-      const nm = h('div.nm', { title: 'Double-click to rename' }, t.id, t.name ? h('small', {}, t.name) : null);
+      const nm = h('div.nm', { title: `${t.id}${t.name ? ` · ${t.name}` : ''}\nDouble-click to rename` }, t.name ? [h('small', {}, t.id), t.name] : t.id);
       nm.addEventListener('dblclick', () => {
         const input = h('input.nm-edit', { value: t.name || '', placeholder: t.id, spellcheck: false, dir: 'auto' });
         const done = (ok) => { if (ok) renameTrack(t.id, input.value.trim()); else render(); };
@@ -140,7 +140,8 @@ export function render() {
         input.focus();
         input.select();
       });
-      const head = h('div.tl-head', { on: { contextmenu: (e) => { e.preventDefault(); trackMenu(e, t); } } }, nm, ...btns);
+      const stuck = t.hidden || t.muted || t.locked;
+      const head = h('div.tl-head', { on: { contextmenu: (e) => { e.preventDefault(); trackMenu(e, t); } } }, nm, h(`div.tl-hb${stuck ? '.stuck' : ''}`, {}, ...btns));
       const row = h(`div.tl-row.k-${t.kind}${t.locked ? '.locked' : ''}`, { 'data-track': t.id, style: { height: `${TRACK_H[t.kind]}px` } }, head, lane);
       rowsEl.append(row);
       return { t, row, lane };

@@ -2,6 +2,8 @@ import { S, on, emit, toast } from './state.js';
 import { $, h, svg, ICON, basename, fmtDur, upload, api } from './util.js';
 import { addClip } from './ops.js';
 import { openCompEditor } from './compedit.js';
+import { ART, templateArt } from './art.js';
+import { openGallery, addTemplate } from './gallery.js';
 
 const root = $('#bin');
 const uploads = new Map();
@@ -48,22 +50,29 @@ export function render() {
   for (const [kind, title] of GROUPS) {
     const items = list.filter((m) => m.kind === kind && !(kind === 'html' && m.path.startsWith('renders/')));
     if (!items.length) continue;
-    kids.push(h('div.bin-group', {}, h('div.gh', {}, title), ...items.map(item)));
+    kids.push(h('div.bin-group', {}, h('div.gh', {}, svg(KIND_ICON[kind]), title, h('span.gh-n', {}, items.length)), ...items.map(item)));
   }
   const tpls = [...S.templates.values()];
   if (tpls.length) {
-    kids.push(h('div.bin-group', {}, h('div.gh', {}, 'Templates'), ...tpls.map((t) => h('div.item', {
-      draggable: true,
-      title: `${t.description || t.title}\nDouble-click: add at playhead · drag: drop on a track`,
-      on: {
-        dragstart: (e) => { e.dataTransfer.setData('text/kadr-src', t.path); e.dataTransfer.effectAllowed = 'copy'; },
-        dblclick: () => (t.path === '@kadr/text.html' ? addText() : addClip(t.path, S.t)),
-      },
-    }, h('div.th.k-tpl', {}, svg(t.path === '@kadr/text.html' ? ICON.text : ICON.code)),
-    h('div.nm', {}, h('b', {}, t.title || basename(t.path)), h('span', {}, `${t.duration ? fmtDur(t.duration) : ''} · ${(t.description || '').split(/[.:]/)[0].toLowerCase()}`))))));
+    kids.push(h('div.bin-group', {},
+      h('div.gh', {}, 'Templates', h('button.btn.link.gh-more', { on: { click: openGallery } }, `See all ${tpls.length}`)),
+      h('div.tpl-grid', {}, ...tpls.slice(0, 8).map((t) => {
+        const th = h('div.tpl-th', { html: templateArt(t.path) });
+        return h('div.tpl', {
+          draggable: true,
+          title: `${t.title}\n${t.description || ''}\nDouble-click: add at playhead · drag: drop on a track`,
+          on: {
+            dragstart: (e) => { e.dataTransfer.setData('text/kadr-src', t.path); e.dataTransfer.effectAllowed = 'copy'; },
+            dblclick: () => addTemplate(t.path),
+          },
+        }, th, h('span', {}, t.title || basename(t.path)));
+      }))));
   }
   if (!list.length) {
-    kids.splice(1, 0, h('div.empty', { html: 'Drop video, audio or images anywhere in the window, or put them in <code>media/</code>.' }));
+    kids.splice(1, 0, h('div.empty.bin-empty', {}, h('div.empty-art', { html: ART.media() }),
+      h('b', {}, 'No media yet'),
+      h('span', { html: 'Drop video, audio or images anywhere in the window, or put them in <code>media/</code>.' }),
+      h('button.btn.sm', { on: { click: pick } }, svg(ICON.upload), 'Import files')));
   }
   root.replaceChildren(...kids);
 }
