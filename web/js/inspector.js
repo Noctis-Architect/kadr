@@ -2,6 +2,7 @@ import { tc, clipEnd, FITS, sourceSpan, isAnimated, EASES } from '/shared/model.
 import { S, on, live, commit, seek, select, duration, snapFrame } from './state.js';
 import { $, h, svg, ICON, fmtNum, clipName, api, drag } from './util.js';
 import { openCompEditor } from './compedit.js';
+import { partView, currentPart } from './parts.js';
 import { pickImage } from './picker.js';
 import { IMG_RE, relPath } from '/shared/htmlsrc.js';
 import {
@@ -374,6 +375,20 @@ function render(o) {
   const m = S.marker ? S.project.markers.find((x) => x.id === S.marker) : null;
   const key = c ? `clip:${c.id}:${c.type}:${c.src}:${c.volume > 1}:${Object.keys(c.props || {}).join(',')}:${Object.keys(c.keys || {}).join(',')}:${!!prevAdjacent(c)}:${c.xfade > 0}:${S.media.has(c.src) || S.templates.has(c.src)}`
     : m ? `marker:${m.id}` : sel.length > 1 ? `multi:${sel.join(',')}` : `project:${S.project.width}x${S.project.height}:${S.project.clips.length}`;
+  const part = c ? currentPart() : null;
+  if (part) {
+    const pkey = `part:${c.id}:${part.p.key}:${part.e.hash}:${JSON.stringify(c.props || {})}`;
+    if (pkey === built && o !== 'force') return;
+    const animate = !built.startsWith('part:');
+    built = pkey;
+    builtObj = part.p;
+    fields = [];
+    const top = root.scrollTop;
+    root.classList.toggle('anim-in', animate);
+    root.replaceChildren(...partView().filter(Boolean));
+    if (!animate) root.scrollTop = top;
+    return;
+  }
   const obj = c || m || S.project;
   if (key === built && obj === builtObj && o !== 'force') {
     for (const f of fields) f();
@@ -395,3 +410,4 @@ on('project', () => render());
 on('time', () => { if (S.sel.size === 1) for (const f of fields) f(); });
 on('select', () => render());
 on('media', () => render('force'));
+on('part-changed', () => render('force'));

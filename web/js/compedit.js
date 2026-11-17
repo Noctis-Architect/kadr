@@ -295,7 +295,7 @@ const sec = (title, ...kids) => h('div.sec', {}, h('h4', {}, ...[].concat(title)
 const row = (lab, ...kids) => h('div.f', {}, h('label.static', { title: lab }, lab), ...kids);
 const stopKeys = (el) => { el.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter' && el.tagName === 'INPUT') el.blur(); }); return el; };
 
-function textInput(value, { area = false, onLive, onCommit }) {
+export function textInput(value, { area = false, onLive, onCommit }) {
   const el = stopKeys(area ? h('textarea.in', { rows: 2, dir: 'auto', spellcheck: false }) : h('input.in', { dir: 'auto', spellcheck: false }));
   el.value = value ?? '';
   if (onLive) el.addEventListener('input', () => onLive(el.value));
@@ -303,14 +303,14 @@ function textInput(value, { area = false, onLive, onCommit }) {
   return el;
 }
 
-function numInput(value, { step = 0.05, unit = '', onCommit, onLive }) {
+export function numInput(value, { step = 0.05, unit = '', onCommit, onLive }) {
   const el = stopKeys(h('input.in', { type: 'number', step, value: num(value) }));
   if (onLive) el.addEventListener('input', () => { const v = parseFloat(el.value); if (Number.isFinite(v)) onLive(v); });
   el.addEventListener('change', () => { const v = parseFloat(el.value); if (Number.isFinite(v)) onCommit(v); });
   return unit ? h('div.unit', { 'data-u': unit }, el) : el;
 }
 
-function colorInput(value, { onLive, onCommit }) {
+export function colorInput(value, { onLive, onCommit }) {
   const norm = (v) => {
     v = String(v).trim();
     if (/^#[0-9a-f]{6}$/i.test(v)) return v;

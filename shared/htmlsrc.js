@@ -310,6 +310,13 @@ function jsTimings(s, a, b, out) {
     out.push({
       kind: m[1],
       label,
+      text: line.trim(),
+      comment: (() => {
+        // the nearest "// comment" line just above (up to 3 lines up) names the timing
+        const lines = code.slice(0, ls).split('\n').slice(-4, -1).reverse();
+        for (const l of lines) { const c = l.trim().match(/^\/\/\s*(.+)/); if (c) return c[1]; if (l.trim() && !/^\/\//.test(l.trim())) break; }
+        return '';
+      })(),
       line: s.slice(0, a + m.index).split('\n').length,
       a: { v: Number(m[4]), r: [a + m.indices[4][0], a + m.indices[4][1]] },
       b: { v: Number(m[5]), r: [a + m.indices[5][0], a + m.indices[5][1]] },
@@ -442,3 +449,126 @@ export function resolvePath(fromDir, p) {
   return parts.join('/');
 }
 
+// ---------- parts: what the timeline shows under a composition clip ----------
+
+/** Does scanned element e match a simple selector (".a.b", "#id", "h1.title", "div > .x" → last compound)? */
+export function matchSimple(e, selector) {
+  return selector.split(',').some((one) => {
+    const last = one.trim().split(/[\s>+~]+/).pop().replace(/::?[\w-]+(\([^)]*\))?/g, '');
+    if (!last) return false;
+    const m = last.match(/^([a-z][\w-]*|\*)?((?:[.#][\w-]+|\[[^\]]+\])*)$/i);
+    if (!m) return false;
+    if (m[1] && m[1] !== '*' && m[1].toLowerCase() !== e.tag) return false;
+    const cls = ` ${(e.attrs.class?.v || '').trim().split(/\s+/).join(' ')} `;
+    for (const part of m[2].match(/[.#][\w-]+|\[[^\]]+\]/g) || []) {
+      if (part[0] === '.' && !cls.includes(` ${part.slice(1)} `)) return false;
+      if (part[0] === '#' && e.attrs.id?.v !== part.slice(1)) return false;
+      if (part[0] === '[') { const an = part.slice(1, -1).split('=')[0].trim().toLowerCase(); if (!(an in e.attrs)) return false; }
+    }
+    return true;
+  });
+}
+
+const ID_IN_JS = /\$\(\s*['"]#?([\w-]+)['"]\s*\)|getElementById\(\s*['"]([\w-]+)['"]\s*\)|querySelector\(\s*['"]#([\w-]+)['"]\s*\)/;
+
+/**
+ * Group a composition's timings into parts: one per element that animates
+ * (named by data-part, its text, or its id/class), plus script timings that
+ * cannot be tied to an element. Each part: { key, name, el, timings: [{kind, ref, s, e, ease}] }.
+ */
+export function partsOf(model, src) {
+  const parts = new Map();
+  const body = model.els.filter((e) => !['html', 'head', 'body', 'meta', 'link', 'script', 'style', 'title'].includes(e.tag));
+  const nameOf = (e) => {
+    if (e.attrs['data-part']) return decodeEnt(e.attrs['data-part'].v);
+    if (e.content && !e.kids && e.text && e.tag !== 'script' && e.tag !== 'style') {
+      const t = decodeEnt(src.slice(e.content[0], e.content[1])).replace(/\s+/g, ' ').trim();
+      if (t) return t.length > 28 ? `${t.slice(0, 27)}…` : t;
+    }
+    if (e.attrs.id) return `#${e.attrs.id.v}`;
+    if (e.attrs.class) return `.${e.attrs.class.v.trim().split(/\s+/)[0]}`;
+    return e.tag;
+  };
+  const keyOf = (e) => (e.attrs['data-part'] ? `p:${e.attrs['data-part'].v}` : e.attrs.id ? `#${e.attrs.id.v}` : e.attrs.class ? `.${e.attrs.class.v.trim().split(/\s+/).join('.')}:${e.tag}` : `${e.tag}@${body.indexOf(e)}`);
+  const part = (e, fallbackKey, fallbackName) => {
+    const key = e ? keyOf(e) : fallbackKey;
+    if (!parts.has(key)) parts.set(key, { key, name: e ? nameOf(e) : fallbackName, el: e || null, timings: [] });
+    return parts.get(key);
+  };
+  model.anims.forEach((a, i) => {
+    const el = body.find((e) => matchSimple(e, a.selector));
+    part(el, `css:${a.selector}`, a.selector).timings.push({ kind: 'css', i, ref: a, s: a.delay, e: a.delay + a.duration, ease: a.easing, name: a.name });
+  });
+  // const w = $('word') / document.getElementById('word') → w means #word
+  const alias = new Map();
+  for (const m of src.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*(?:\$|document\.getElementById|document\.querySelector)\(\s*['"]#?([\w-]+)['"]\s*\)/g)) alias.set(m[1], m[2]);
+  model.js.forEach((j, i) => {
+    const m = j.text.match(ID_IN_JS);
+    let id = m && (m[1] || m[2] || m[3]);
+    if (!id) { const a = j.text.match(/^(\w+)\./); if (a && alias.has(a[1])) id = alias.get(a[1]); }
+    const el = id ? body.find((e) => e.attrs.id?.v === id) : null;
+    const v = j.text.match(/^(?:const|let|var)\s+(\w+)\s*=/);
+    const nm = j.comment ? (j.comment.length > 32 ? `${j.comment.slice(0, 31)}…` : j.comment) : v ? `${v[1]} (line ${j.line})` : j.label;
+    part(el, `js:${j.line}:${j.label}`, nm).timings.push({ kind: 'js', i, ref: j, s: j.a.v, e: j.b.v, ease: j.ease?.v || 'linear', name: nm });
+  });
+  for (const p of parts.values()) {
+    p.s = Math.min(...p.timings.map((t) => t.s));
+    p.e = Math.max(...p.timings.map((t) => t.e));
+  }
+  return [...parts.values()].sort((x, y) => x.s - y.s || x.e - y.e);
+}
+
+// ---------- edit builders ----------
+
+/** Edits that set a CSS animation's delay and duration. */
+export function animEdits(a, delay, duration) {
+  const D = fmtTime(duration, a.unit);
+  const L = fmtTime(delay, a.unit);
+  if (a.longhand) {
+    if (!a.dr && !a.lr) return [{ a: a.bodyEnd, b: a.bodyEnd, text: ` animation-duration: ${D};${delay ? ` animation-delay: ${L};` : ''}` }];
+    const out = [];
+    out.push(a.dr ? { a: a.dr[0], b: a.dr[1], text: D } : { a: a.bodyEnd, b: a.bodyEnd, text: ` animation-duration: ${D};` });
+    if (a.lr) out.push({ a: a.lr[0], b: a.lr[1], text: L });
+    else if (delay) out.push({ a: a.bodyEnd, b: a.bodyEnd, text: ` animation-delay: ${L};` });
+    return out;
+  }
+  if (!a.dr) return [{ a: a.ins, b: a.ins, text: `${D} ${delay || a.lr ? `${L} ` : ''}` }];
+  const out = [{ a: a.dr[0], b: a.dr[1], text: D }];
+  if (a.lr) out.push({ a: a.lr[0], b: a.lr[1], text: L });
+  else if (delay) out.push({ a: a.ins, b: a.ins, text: ` ${L}` });
+  return out;
+}
+export function animEaseEdit(a, v) {
+  if (a.er) return { a: a.er[0], b: a.er[1], text: v };
+  if (a.longhand) return { a: a.bodyEnd, b: a.bodyEnd, text: ` animation-timing-function: ${v};` };
+  return { a: a.ins, b: a.ins, text: a.dr ? ` ${v}` : `${v} ` };
+}
+const jnum = (v) => String(Math.round(v * 1000) / 1000);
+export function jsEdits(j, s, e) {
+  return [{ a: j.a.r[0], b: j.a.r[1], text: jnum(s) }, { a: j.b.r[0], b: j.b.r[1], text: jnum(e) }];
+}
+export function jsEaseEdit(j, v) {
+  if (j.ease) return { a: j.ease.r[0], b: j.ease.r[1], text: v };
+  if (j.easeIns != null) return { a: j.easeIns, b: j.easeIns, text: `, '${v}'` };
+  return null;
+}
+/** Edits that move / stretch a whole part: start at s, last for len (timings scale from the part start). */
+export function partTimeEdits(p, s, len) {
+  const k = len / Math.max(1e-6, p.e - p.s);
+  const out = [];
+  for (const t of p.timings) {
+    const ns = s + (t.s - p.s) * k;
+    const ne = s + (t.e - p.s) * k;
+    out.push(...(t.kind === 'css' ? animEdits(t.ref, Math.max(0, ns), Math.max(0.01, ne - ns)) : jsEdits(t.ref, Math.max(0, ns), Math.max(ns + 0.01, ne))));
+  }
+  return out;
+}
+/** The CSS rule declaration that sets `prop` for element e (last matching rule wins), if any. */
+export function ruleDecl(model, e, prop) {
+  let found = null;
+  for (const r of model.rules) {
+    if (!matchSimple(e, r.selector)) continue;
+    for (const d of r.decls) if (d.prop === prop) found = d;
+  }
+  return found;
+}

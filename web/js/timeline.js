@@ -216,6 +216,7 @@ export function render() {
   }
   drawPlayhead();
   drawViewport();
+  emit('tl-render');
 }
 
 export function drawPlayhead() {
