@@ -10,6 +10,10 @@ import { renderProject } from './render.js';
 import { findChrome } from './chrome.js';
 import { AgentBridge } from './agent.js';
 import { probe } from './media.js';
+import { findRoot } from './project.js';
+import { initProject } from './init.js';
+import { listRecent, touchRecent, forgetRecent, recentPaths, thumbFor } from './recent.js';
+import os from 'node:os';
 import crypto from 'node:crypto';
 
 const MIME = {
@@ -126,23 +130,25 @@ const safeName = (n) => path.basename(String(n)).replace(/[^\w.\- ()؀-ۿ]+/g, '
  * Start the local server.
  * ui:false + watch:false is the "render only" mode the CLI uses.
  */
-export async function startServer({ root, port = 4310, host = '127.0.0.1', ui = true, watch = true, quiet = false } = {}) {
-  const media = new Media(root);
-  await media.load();
+export async function startServer({ root: startRoot, port = 4310, host = '127.0.0.1', ui = true, watch = true, quiet = false } = {}) {
   const clients = new Set();
   const broadcast = (msg) => {
     const data = `data: ${JSON.stringify(msg)}\n\n`;
     for (const res of clients) res.write(data);
   };
-  media.on(broadcast);
-  const projectFile = path.join(root, 'project.json');
-  let lastText = await readProjectText(root).catch(() => null);
+  // Per-project state. The editor can switch projects (Projects menu), so all of
+  // this is replaced by openRoot() instead of living for the whole process.
+  let root = '';
+  let media = null;
+  let projectFile = '';
+  let lastText = null;
+  let agent = null;
+  let watcher = null;
   let job = null;
   // Every state-changing request must carry this token. Only our own page gets
   // it (injected into index.html), so other sites can't drive the editor or the
   // agent through localhost.
   const token = crypto.randomBytes(18).toString('hex');
-  const agent = new AgentBridge(root, broadcast);
   let baseUrl = '';
   const recent = [];
   const activity = (entry) => {
@@ -166,13 +172,12 @@ export async function startServer({ root, port = 4310, host = '127.0.0.1', ui = 
     activity({ kind: 'project', path: 'project.json' });
   }
 
-  let watcher = null;
-  if (watch) {
+  function startWatch() {
     const timers = new Map();
     let mediaTimer = null;
     const ignore = (name) => /^(\.kadr|\.git|node_modules|renders)(\/|$)/.test(name)
       || /\.tmp$|\.part(\.\w+)?$|\.partial\.\w+$|~$|\.swp$|\.swx$|(^|\/)\.project\.json|(^|\/)\.#|\/4913$|^4913$/.test(name);
-    watcher = watchTree(root, ignore, (name) => {
+    return watchTree(root, ignore, (name) => {
       clearTimeout(timers.get(name));
       timers.set(name, setTimeout(() => {
         timers.delete(name);
@@ -186,6 +191,31 @@ export async function startServer({ root, port = 4310, host = '127.0.0.1', ui = 
       }, 70));
     });
   }
+
+  /** Make dir the open project: new media index, chat, watcher. */
+  async function openRoot(dir) {
+    if (job?.state === 'running') throw Object.assign(new Error('an export is running: wait for it or cancel it first'), { status: 409 });
+    if (agent?.proc) throw Object.assign(new Error('the chat agent is still working: stop it first'), { status: 409 });
+    const m = new Media(dir);
+    await m.load();
+    watcher?.close();
+    watcher = null;
+    agent?.stop();
+    media?.listeners.clear();
+    root = dir;
+    media = m;
+    media.on(broadcast);
+    projectFile = path.join(root, 'project.json');
+    lastText = await readProjectText(root).catch(() => null);
+    agent = new AgentBridge(root, broadcast);
+    job = null;
+    recent.length = 0;
+    if (watch) watcher = startWatch();
+    if (ui) await touchRecent(root);
+  }
+  await openRoot(startRoot);
+
+  const expand = (p) => path.resolve(String(p || '').trim().replace(/^~(?=$|\/)/, os.homedir()));
 
   async function startExport(body) {
     if (job?.state === 'running') throw Object.assign(new Error('an export is already running'), { status: 409 });
@@ -348,6 +378,40 @@ export async function startServer({ root, port = 4310, host = '127.0.0.1', ui = 
       openPath(body.select ? path.dirname(abs) : abs);
       return json(res, 200, { ok: true });
     }
+    // ---------- projects (recent list, open, new) ----------
+    if (p === '/api/recent' && m === 'GET') {
+      return json(res, 200, { current: root, home: os.homedir(), list: await listRecent() });
+    }
+    if (p === '/api/recent/thumb') {
+      const dir = String(url.searchParams.get('path') || '');
+      if (!(await recentPaths()).includes(dir)) return json(res, 404, { error: 'not a recent project' });
+      const f = thumbFor(dir);
+      return f ? sendFile(req, res, f) : json(res, 404, { error: 'no picture' });
+    }
+    if (p === '/api/recent/forget' && m === 'POST') {
+      await forgetRecent(String(JSON.parse(await readBody(req)).path || ''));
+      return json(res, 200, { ok: true });
+    }
+    if (p === '/api/open' && m === 'POST') {
+      const want = expand(JSON.parse(await readBody(req)).path);
+      const dir = fs.existsSync(path.join(want, 'project.json')) ? want : findRoot(want);
+      if (!dir) return json(res, 404, { error: `no project.json in ${want}` });
+      if (dir !== root) {
+        await openRoot(dir);
+        broadcast({ type: 'reopen', root });
+      }
+      return json(res, 200, { root });
+    }
+    if (p === '/api/new' && m === 'POST') {
+      const b = JSON.parse(await readBody(req));
+      const dir = expand(b.path);
+      if (fs.existsSync(path.join(dir, 'project.json'))) return json(res, 409, { error: `${dir} already has a project` });
+      await initProject(dir, { name: String(b.name || '').trim() || undefined, width: Number(b.width) || 1920, height: Number(b.height) || 1080, fps: Number(b.fps) || 30 });
+      await openRoot(dir);
+      broadcast({ type: 'reopen', root });
+      return json(res, 200, { root });
+    }
+
     if (p.startsWith('/api/')) return json(res, 404, { error: 'unknown endpoint' });
     if (p === '/favicon.ico') {
       if (ui) return sendFile(req, res, path.join(APP_DIR, 'web', 'favicon.svg'));
@@ -399,7 +463,8 @@ export async function startServer({ root, port = 4310, host = '127.0.0.1', ui = 
 
   return {
     url: baseUrl,
-    media,
+    get media() { return media; },
+    get root() { return root; },
     broadcast,
     async close() {
       agent.stop();

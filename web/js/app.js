@@ -10,6 +10,7 @@ import './inspector.js';
 import { render as renderBin, importFiles, addText } from './bin.js';
 import { openExport } from './exporter.js';
 import { loadChat, focusChat } from './chat.js';
+import { openProjects } from './projects.js';
 import { splitAtPlayhead, deleteSelected, duplicateSelected, addMarker, addTrack, copySelected, paste, nudge, rippleTrim, jumpKey, clipById, isLocked } from './ops.js';
 import { toggleGuides } from './viewer.js';
 
@@ -73,6 +74,8 @@ function connect() {
       if (m.origin === 'disk') flashExternal('project.json changed on disk');
     } else if (m.type === 'project-error') {
       showFatal(m.error);
+    } else if (m.type === 'reopen') {
+      if (m.root !== S.root) { flushSave(); location.reload(); }
     } else if (m.type === 'asset') {
       reloadAsset(m.path);
       if (/\.html?$/.test(m.path)) { S.compErrors.delete(m.path); flashExternal(`${basename(m.path)} updated`); }
@@ -156,7 +159,7 @@ const KEYS = [
   ['Alt ← →', 'nudge clips a frame (Shift: 10)'], ['Alt drag', 'copy a clip'], ['Shift E', 'enable / disable'],
   ['[ ]', 'previous / next keyframe'], ['I · O · X', 'in · out · clear'], ['M', 'marker'], ['T', 'text clip'],
   ['N', 'snapping'], ['G', 'safe-area guides'], ['+ − \\', 'zoom · fit'], ['Right-click', 'clip, gap and track menus'],
-  ['Ctrl Z', 'undo (agent edits too)'], ['Ctrl E', 'export'], ['/', 'open chat'],
+  ['Ctrl Z', 'undo (agent edits too)'], ['Ctrl E', 'export'], ['Ctrl O', 'projects: recent · open · new'], ['/', 'open chat'],
 ];
 $('#helpBtn').onclick = (e) => openPop(e.currentTarget, h('div.sec', {}, h('h4', {}, 'Keyboard'),
   h('div.keys', {}, ...KEYS.flatMap(([k, v]) => [h('span.kbd', {}, k), h('span', {}, v)]))));
@@ -180,6 +183,7 @@ $('#undoBtn').onclick = undo;
 $('#redoBtn').onclick = redo;
 on('history', () => { $('#undoBtn').disabled = !canUndo(); $('#redoBtn').disabled = !canRedo(); });
 $('#exportBtn').onclick = openExport;
+$('#projBtn').onclick = openProjects;
 $('#splitBtn').onclick = splitAtPlayhead;
 $('#addTextBtn').onclick = addText;
 $('#addMarkerBtn').onclick = () => selectMarker(addMarker(S.t));
@@ -250,6 +254,7 @@ window.addEventListener('keydown', (e) => {
   if (mod && k.toLowerCase() === 'v') { stop(); return paste(); }
   if (mod && k.toLowerCase() === 'k') { stop(); return splitAtPlayhead(); }
   if (mod && k.toLowerCase() === 'e') { stop(); return openExport(); }
+  if (mod && k.toLowerCase() === 'o') { stop(); return openProjects(); }
   if (mod) return;
   if (e.altKey && (k === 'ArrowLeft' || k === 'ArrowRight')) { stop(); return nudge((k === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1)); }
   switch (k) {
