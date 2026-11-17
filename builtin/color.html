@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="kadr:category" content="Basics">
+<meta name="kadr:duration" content="5">
+<meta name="kadr:description" content="A full-frame solid color or gradient: backgrounds, or a color tint over footage (put it on a track above and lower the clip's opacity to 0.05–0.15).">
+<meta name="kadr:props" content='{"color":"#0b0b0e","color2":""}'>
+<meta name="kadr:fields" content='{"color2":{"type":"color","label":"Gradient to","description":"Leave empty for a solid color."}}'>
+<title>Color</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  #c { position: absolute; inset: 0; }
+</style>
+</head>
+<body>
+<div id="c"></div>
+<script>
+  const a = kadr.prop('color', '#0b0b0e');
+  const b = kadr.prop('color2', '');
+  document.getElementById('c').style.background = b ? `linear-gradient(160deg, ${a}, ${b})` : a;
+</script>
+</body>
+</html>

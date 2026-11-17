@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AGENTS, SERVICES, KEYS } from '../shared/providers.js';
+import { AGENTS, SERVICES, KEYS, LLM, CLAUDE_VIA } from '../shared/providers.js';
 
 export function settingsFile() {
   if (process.env.KADR_CONFIG) return path.resolve(process.env.KADR_CONFIG);
@@ -14,12 +14,14 @@ export function settingsFile() {
   return path.join(base, 'kadr', 'settings.json');
 }
 
-const DEFAULTS = { agent: 'claude', keys: {}, llm: { provider: 'anthropic' }, image: {}, speech: {}, transcribe: {} };
+const DEFAULTS = { agent: 'claude', keys: {}, custom: {}, claudeVia: {}, llm: { provider: 'anthropic' }, image: {}, speech: {}, transcribe: {} };
 
 // Environment keys used when a service has no key saved.
 const ENV_KEYS = {
   anthropic: ['ANTHROPIC_API_KEY'], openai: ['OPENAI_API_KEY'], openrouter: ['OPENROUTER_API_KEY'],
   gemini: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'], elevenlabs: ['ELEVENLABS_API_KEY'], groq: ['GROQ_API_KEY'],
+  deepseek: ['DEEPSEEK_API_KEY'], zai: ['ZAI_API_KEY', 'ZHIPU_API_KEY'], moonshot: ['MOONSHOT_API_KEY'], qwen: ['DASHSCOPE_API_KEY'],
+  mistral: ['MISTRAL_API_KEY'], xai: ['XAI_API_KEY'],
 };
 
 export function loadSettings() {
@@ -28,6 +30,8 @@ export function loadSettings() {
   const out = { ...DEFAULTS, ...s };
   for (const k of Object.keys(SERVICES)) out[k] = { ...(DEFAULTS[k] || {}), ...(s[k] || {}) };
   out.keys = { ...(s.keys || {}) };
+  out.custom = { ...(s.custom || {}) };
+  out.claudeVia = { ...(s.claudeVia || {}) };
   // Older settings kept a key per service: share it per provider instead.
   for (const k of Object.keys(SERVICES)) {
     const c = out[k];
@@ -68,7 +72,8 @@ const mask = (k) => (k ? `••••${String(k).slice(-4)}` : '');
 
 /** What the browser may see: everything except the keys themselves. */
 export function publicSettings(s) {
-  const out = { agent: s.agent, file: settingsFile(), keys: {} };
+  const { key: viaKey, ...via } = s.claudeVia || {};
+  const out = { agent: s.agent, file: settingsFile(), keys: {}, custom: s.custom || {}, claudeVia: { ...via, keySaved: mask(viaKey) } };
   for (const p of Object.keys(KEYS)) out.keys[p] = { saved: mask(s.keys?.[p]), env: !s.keys?.[p] && !!keyFor(s, p) };
   for (const k of Object.keys(SERVICES)) {
     const { key, ...rest } = s[k] || {};
@@ -83,6 +88,23 @@ export function mergeSettings(cur, patch) {
   const next = { ...cur };
   if (patch.agent && AGENTS[patch.agent]) next.agent = patch.agent;
   next.keys = { ...(cur.keys || {}) };
+  if (patch.custom && typeof patch.custom === 'object') {
+    next.custom = { ...(cur.custom || {}) };
+    for (const f of ['name', 'command']) if (typeof patch.custom[f] === 'string') next.custom[f] = patch.custom[f].trim() || undefined;
+  }
+  if (patch.claudeVia && typeof patch.claudeVia === 'object') {
+    const v = { ...(cur.claudeVia || {}) };
+    const pv = patch.claudeVia;
+    if (pv.provider !== undefined) {
+      if (pv.provider && !CLAUDE_VIA[pv.provider]) throw new Error(`unknown provider: ${pv.provider}`);
+      if (pv.provider !== v.provider) { delete v.model; delete v.baseUrl; delete v.key; }
+      v.provider = pv.provider || undefined;
+    }
+    for (const f of ['model', 'baseUrl']) if (typeof pv[f] === 'string') v[f] = pv[f].trim() || undefined;
+    if (typeof pv.key === 'string' && pv.key.trim()) { if (KEYS[v.provider]) next.keys[v.provider] = pv.key.trim(); else v.key = pv.key.trim(); }
+    if (pv.clearKey) delete v.key;
+    next.claudeVia = JSON.parse(JSON.stringify(v));
+  }
   for (const [p, v] of Object.entries(patch.keys || {})) {
     if (!KEYS[p]) throw new Error(`unknown provider: ${p}`);
     if (v === null || v === '') delete next.keys[p];
@@ -128,6 +150,7 @@ export async function testKey(provider, key, baseUrl) {
     gemini: ['https://generativelanguage.googleapis.com/v1beta/openai/models', bearer],
     openrouter: ['https://openrouter.ai/api/v1/key', bearer],
     groq: ['https://api.groq.com/openai/v1/models', bearer],
+    ...Object.fromEntries(['deepseek', 'zai', 'moonshot', 'qwen', 'mistral', 'xai'].map((k) => [k, [`${LLM[k].baseUrl}/models`, bearer]])),
     elevenlabs: ['https://api.elevenlabs.io/v1/user', { 'xi-api-key': key }],
     custom: [`${String(baseUrl || '').replace(/\/+$/, '')}/models`, bearer],
   }[provider];
@@ -139,4 +162,20 @@ export async function testKey(provider, key, baseUrl) {
   if (r.status === 0) return { ok: false, message: `cannot reach the service (${r.body})` };
   if (r.status === 401 || r.status === 403) return { ok: false, message: 'the key was rejected' };
   return { ok: false, message: `the service answered ${r.status}` };
+}
+
+/** Env for running Claude Code on another Anthropic-compatible service, or null. */
+export function claudeEnv(s) {
+  const v = s.claudeVia || {};
+  const p = CLAUDE_VIA[v.provider];
+  if (!p) return null;
+  const baseUrl = String(v.baseUrl || p.baseUrl || '').replace(/\/+$/, '');
+  const key = keyFor(s, v.provider) || v.key || '';
+  if (!baseUrl) throw new Error('Claude Code via another service: set its base URL in AI settings');
+  if (!key) throw new Error(`Claude Code via ${p.name}: add the API key in AI settings`);
+  const model = v.model || p.model || '';
+  return {
+    name: p.name,
+    env: { ANTHROPIC_BASE_URL: baseUrl, ANTHROPIC_AUTH_TOKEN: key, ...(model ? { ANTHROPIC_MODEL: model, ANTHROPIC_SMALL_FAST_MODEL: model } : {}) },
+  };
 }

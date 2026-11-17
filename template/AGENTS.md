@@ -42,8 +42,11 @@ its `src` file and `key`, an element's `data-part` name (`p:Title`), `#id` or
 Step-by-step guides for common jobs live in `.claude/skills/<name>/SKILL.md`.
 Read the matching one before you start that kind of edit:
 `youtube-video`, `shorts-reels` (Shorts, Reels, TikTok), `instagram-post`,
+`social-formats` (X, LinkedIn, Telegram, Aparat… and versions for several platforms),
 `captions`, `repurpose-clips` (long video to shorts), `thumbnail`,
-`voiceover-explainer` (video from a script, no camera).
+`voiceover-explainer` (video from a script, no camera), `podcast-video`,
+`screencast-tutorial`, `product-promo`, `photo-slideshow`, `montage-highlights`
+(music-driven reels: travel, events, vlogs), `color-look`, `audio-mix`.
 
 ## Generating media
 

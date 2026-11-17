@@ -3,7 +3,7 @@
 // AI experts: an overview with plain status, one-key quick setup, cards
 // instead of dropdowns, advanced fields folded away, and every change saved
 // immediately. Keys go to the local server once and only "••••1234" comes back.
-import { AGENTS, SERVICES, KEYS, NOTES } from '/shared/providers.js';
+import { AGENTS, SERVICES, KEYS, NOTES, CLAUDE_VIA } from '/shared/providers.js';
 import { toast } from './state.js';
 import { $, h, api } from './util.js';
 
@@ -53,7 +53,14 @@ export async function openAiSettings(onSaved, startPage = 'overview') {
       const s = svcStatus('llm');
       return s.level === 'ok' ? { level: 'ok', text: `${SERVICES.llm[cur.llm.provider].name}` } : s;
     }
-    return cur.agents?.[cur.agent] === false ? { level: 'warn', text: `${AGENTS[cur.agent].name} not installed` } : { level: 'ok', text: AGENTS[cur.agent].name };
+    if (cur.agent === 'custom') return cur.agents?.custom ? { level: 'ok', text: cur.custom?.name || 'Your command' } : { level: 'warn', text: 'Needs a command' };
+    if (cur.agents?.[cur.agent] === false) return { level: 'warn', text: `${AGENTS[cur.agent].name} not installed` };
+    if (cur.agent === 'claude' && cur.claudeVia?.provider) {
+      const v = CLAUDE_VIA[cur.claudeVia.provider];
+      const hasKey = keyInfo(cur.claudeVia.provider, 'claudeVia');
+      return hasKey ? { level: 'ok', text: `Claude Code · ${v.name}` } : { level: 'warn', text: `${v.name} needs a key` };
+    }
+    return { level: 'ok', text: AGENTS[cur.agent].name };
   }
   const statusOf = (k) => (k === 'agent' ? agentStatus() : k === 'keys' ? null : k === 'overview' ? null : svcStatus(k));
 
@@ -198,15 +205,61 @@ export async function openAiSettings(onSaved, startPage = 'overview') {
   }
 
   function agentPage() {
-    const cards = Object.entries(AGENTS).map(([k, a]) => {
-      const installed = cur.agents?.[k] !== false;
+    const card = (k, a) => {
+      const installed = cur.agents?.[k] !== false || k === 'custom';
+      const tag = k === 'claude' ? h('i.tag.ok', {}, 'recommended') : k === 'api' ? h('i.tag', {}, 'your key') : k === 'custom' ? h('i.tag', {}, 'any CLI') : !installed ? h('i.tag', {}, 'not installed') : h('i.tag.ok', {}, 'installed');
       return h(`button.ai-card${cur.agent === k ? '.on' : ''}`, { disabled: !installed, on: { click: () => cur.agent !== k && save({ agent: k }) } },
-        h('b', {}, a.name, k === 'claude' ? h('i.tag.ok', {}, 'recommended') : !installed ? h('i.tag', {}, 'not installed') : k === 'api' ? h('i.tag', {}, 'your key') : null),
-        h('span', {}, installed ? a.note : `Install ${a.bin} and sign in once in a terminal to use it.`));
-    });
-    const kids = [h('h3', {}, ABOUT.agent[0]), h('p.hint', {}, 'Who does the editing when you write in the chat. Agents you already use on this computer work with their own login, no key needed.'), h('div.ai-cards', {}, ...cards)];
+        h('b', {}, a.name, tag), h('span', {}, installed ? a.note : `Install ${a.bin} and sign in once in a terminal, then reopen this window.`));
+    };
+    const entries = Object.entries(AGENTS);
+    const ready = entries.filter(([k, a]) => a.bin && cur.agents?.[k] !== false);
+    const missing = entries.filter(([k, a]) => a.bin && cur.agents?.[k] === false);
+    const kids = [h('h3', {}, ABOUT.agent[0]),
+      h('p.hint', {}, 'Who does the editing when you write in the chat. Agents already installed on this computer use their own login; no key needed here.'),
+      h('div.ai-cards', {}, ...ready.map(([k, a]) => card(k, a)), card('api', AGENTS.api), card('custom', AGENTS.custom))];
+    if (missing.length) {
+      kids.push(h('details.ai-adv', {}, h('summary', {}, `Other agents kadr knows (${missing.length}, not installed here)`),
+        h('div.ai-cards', {}, ...missing.map(([k, a]) => card(k, a)))));
+    }
+    const a = AGENTS[cur.agent];
+    if (a?.run) {
+      kids.push(h('div.ai-sec', {}, h('h6', {}, 'How kadr runs it'),
+        h('code.ai-cmd', {}, [a.bin, ...a.run.limited.map((x) => (x === '{prompt}' ? '"<your message>"' : x))].join(' ')),
+        h('div.hint.ai-under', {}, 'Once per message, in the project folder. Set the model inside that tool (its own settings or login).')));
+    }
+    if (cur.agent === 'claude') kids.push(claudeViaSection());
     if (cur.agent === 'api') kids.push(h('div.ai-sec', {}, h('h6', {}, 'Which model service'), ...servicePicker('llm', { allowOff: false })));
+    if (cur.agent === 'custom') {
+      const ok = cur.agents?.custom;
+      kids.push(h('div.ai-sec', {}, h('h6', {}, 'Your agent'),
+        field('Name', cur.custom?.name, { placeholder: 'e.g. My agent', onSave: (v) => save({ custom: { name: v } }) }),
+        field('Command', cur.custom?.command, {
+          placeholder: 'mycli -p {prompt}', onSave: (v) => save({ custom: { command: v } }),
+          hint: 'kadr runs this in the project folder for every message and puts the message where {prompt} is (or at the end). Its printed output becomes the reply.',
+        }),
+        cur.custom?.command ? h(`div.ai-test.${ok ? 'ok' : 'bad'}`, {}, ok ? '✓ found the program' : '✕ the program was not found on this computer') : null));
+    }
     return kids;
+  }
+
+  /** Claude Code on another Anthropic-compatible service (GLM, DeepSeek, Kimi…). */
+  function claudeViaSection() {
+    const v = cur.claudeVia || {};
+    const cards = [h(`button.ai-card${!v.provider ? '.on' : ''}`, { on: { click: () => v.provider && save({ claudeVia: { provider: '' } }) } }, h('b', {}, 'Your Claude account'), h('span', {}, 'Claude Code as usual, with your Claude login.'))];
+    for (const [id, p] of Object.entries(CLAUDE_VIA)) {
+      cards.push(h(`button.ai-card${v.provider === id ? '.on' : ''}`, { on: { click: () => v.provider !== id && save({ claudeVia: { provider: id } }) } },
+        h('b', {}, p.name, keyInfo(id, 'claudeVia') ? h('i.tag.ok', {}, 'key ✓') : h('i.tag', {}, 'needs key')),
+        h('span', {}, id === 'custom' ? 'Any service with an Anthropic-compatible API.' : `Claude Code's tools, ${p.name}'s model. Usually much cheaper.`)));
+    }
+    const kids = [h('h6', {}, 'Model behind Claude Code'), h('div.ai-cards', {}, ...cards)];
+    const p = CLAUDE_VIA[v.provider];
+    if (p) {
+      if (v.provider === 'custom') kids.push(field('Base URL', v.baseUrl, { placeholder: 'https://…/anthropic', onSave: (x) => save({ claudeVia: { baseUrl: x } }) }));
+      kids.push(h('div.ai-sec', {}, h('h6', {}, 'API key'), keyBox(v.provider, 'claudeVia')));
+      kids.push(h('details.ai-adv', {}, h('summary', {}, 'Advanced'),
+        field('Model', v.model, { placeholder: p.model || 'service default', onSave: (x) => save({ claudeVia: { model: x } }), hint: 'Leave empty to let the service pick its default model.' })));
+    }
+    return h('div.ai-sec', {}, ...kids);
   }
 
   function servicePage(kind) {

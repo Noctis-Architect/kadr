@@ -8,8 +8,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { AGENTS } from '../shared/providers.js';
-import { loadSettings, service } from './settings.js';
-import { ApiAgent, skillIndex } from './apiagent.js';
+import { loadSettings, service, claudeEnv } from './settings.js';
+import { ApiAgent, skillIndex, splitArgs } from './apiagent.js';
 import { installSkills } from './init.js';
 
 export function which(bin) {
@@ -31,7 +31,7 @@ const SYSTEM = `You are the assistant built into kadr, a local video editor. The
 - After edits run \`kadr validate\`. For anything visual, check your work with \`kadr frame <t>\` or \`kadr sheet\` and look at the PNG before saying you're done. Never pass -o to them: the default .kadr/frames/ path is shown to the user in the chat.
 - Write everything (progress notes too) in the language of the user's message, often Persian. Be brief: say what you changed in one to three short sentences. No markdown headings.
 - Do not run \`kadr render\` unless the user asks for a final export.
-- For a platform-specific edit (YouTube, Shorts/Reels/TikTok, Instagram, podcasts, captions, thumbnails, voice-over), read the matching skill in .claude/skills/<name>/SKILL.md first and follow it.
+- For a known kind of job (YouTube, Shorts/Reels/TikTok, Instagram and other socials, podcasts, tutorials, promos, slideshows, montages, captions, thumbnails, voice-over, color, sound), read the matching skill in .claude/skills/<name>/SKILL.md first and follow it.
 - To make new media use \`kadr gen image "<prompt>"\`, \`kadr gen speech "<text>"\` and \`kadr gen transcribe <file>\` (they print the new file's path). If one says a service is not set up, tell the user to set it up in Chat → settings; don't look for keys yourself.`;
 
 const SAFE_TOOLS = [
@@ -53,6 +53,17 @@ function summarizeTool(name, input = {}) {
   }
 }
 
+/** The user's own agent command from settings: { bin, args } or null if missing / not found. */
+function customCommand(s) {
+  const c = s.custom?.command;
+  if (!c) return null;
+  let argv;
+  try { argv = splitArgs(c); } catch { return null; }
+  if (!argv.length) return null;
+  const bin = argv[0].includes('/') ? (fs.existsSync(argv[0]) ? argv[0] : null) : which(argv[0]);
+  return bin ? { bin, args: argv.slice(1) } : null;
+}
+
 export class AgentBridge {
   constructor(root, broadcast) {
     this.root = root;
@@ -66,12 +77,16 @@ export class AgentBridge {
   info() {
     const s = loadSettings();
     const agents = Object.fromEntries(Object.entries(AGENTS).map(([k, a]) => [k, a.bin ? !!which(a.bin) : true]));
+    agents.custom = !!customCommand(s);
     const llm = service(s, 'llm');
+    let via = null;
+    try { via = s.agent === 'claude' ? claudeEnv(s) : null; } catch { via = { name: 'another service (not set up)' }; }
     return {
       agent: s.agent,
-      agentName: AGENTS[s.agent].name,
+      agentName: s.agent === 'custom' ? s.custom?.name || 'Your command' : AGENTS[s.agent].name,
       ready: s.agent === 'api' ? !!(llm && llm.model && llm.baseUrl && (!llm.needsKey || llm.key)) : agents[s.agent],
-      apiModel: s.agent === 'api' ? llm?.model || '' : '',
+      apiModel: s.agent === 'api' ? llm?.model || '' : via ? via.name : '',
+      claudeVia: !!via,
       agents,
       busy: !!this.proc,
       messages: this.state.messages,
@@ -148,25 +163,31 @@ export class AgentBridge {
       if (!svc.model) throw new Error(`${svc.name}: set the model name in Chat → settings`);
       if (!svc.baseUrl) throw new Error(`${svc.name}: set the base URL in Chat → settings`);
       if (svc.needsKey && !svc.key) throw new Error(`${svc.name} needs an API key: add it in Chat → settings`);
+    } else if (kind === 'custom') {
+      const cmd = customCommand(settings);
+      if (!cmd) throw new Error('set your agent command in AI settings → Chat agent (e.g. mycli -p {prompt})');
+      bin = cmd.bin;
     } else {
       bin = which(meta.bin);
       if (!bin) throw new Error(`${meta.name} (${meta.bin}) is not installed or not on PATH`);
     }
+    const claudeVia = kind === 'claude' ? claudeEnv(settings) : null;
     // Skills the system prompt points at; adds missing ones, never overwrites.
     await installSkills(this.root).catch(() => {});
 
     const id = Date.now().toString(36);
     await this.checkpoint(id);
     const user = { id, role: 'user', text, at: Date.now() };
-    const reply = { id: `${id}r`, turn: id, role: 'assistant', text: '', steps: [], images: [], at: Date.now(), agent: kind === 'api' ? `${svc.name} · ${svc.model}` : meta.name };
+    const reply = { id: `${id}r`, turn: id, role: 'assistant', text: '', steps: [], images: [], at: Date.now(), agent: kind === 'api' ? `${svc.name} · ${svc.model}` : kind === 'custom' ? settings.custom?.name || 'Your command' : claudeVia ? `${meta.name} · ${claudeVia.name}` : meta.name };
     const history = this.state.messages.slice(-8);
     this.state.messages.push(user, reply);
     this.emit({ ev: 'user', message: user });
     this.emit({ ev: 'start', message: reply });
     const prompt = `${context ? `[editor] ${context}\n\n` : ''}${text}`;
-    if (kind === 'claude') return this.runClaude(bin, reply, prompt, { model, full });
+    if (kind === 'claude') return this.runClaude(bin, reply, prompt, { model: claudeVia ? '' : model, full, env: claudeVia?.env });
     if (kind === 'api') return this.runApi(svc, reply, prompt, { full, provider: `${svc.provider}|${svc.model}` });
-    return this.runCli(kind, bin, reply, prompt, history, { full, id });
+    const argv = kind === 'custom' ? customCommand(settings).args : (full ? meta.run.full : meta.run.limited);
+    return this.runCli(bin, argv, reply, prompt, history, { full, id });
   }
 
   finish(reply) {
@@ -219,13 +240,11 @@ ${skills.map((k) => `- ${k.name}: ${k.description} (${k.file})`).join('\n')}` : 
   }
 
   /** Another agent CLI, run once per message; its plain output is the reply. */
-  async runCli(kind, bin, reply, prompt, history, { full, id }) {
+  async runCli(bin, argv, reply, prompt, history, { id }) {
     const past = history.filter((m) => m.text && !m.reverted).map((m) => `${m.role === 'user' ? 'User' : 'You'}: ${m.text.slice(0, 1200)}`).join('\n\n');
     const full_prompt = `${SYSTEM}\n${past ? `\nEarlier in this conversation:\n${past}\n` : ''}\n${prompt}`;
-    let args;
-    if (kind === 'codex') args = ['exec', '--skip-git-repo-check', ...(full ? ['--dangerously-bypass-approvals-and-sandbox'] : ['--full-auto']), full_prompt];
-    else if (kind === 'gemini') args = ['-p', full_prompt, ...(full ? ['--yolo'] : ['--approval-mode', 'auto_edit', '--allowed-tools', 'run_shell_command(kadr)', 'run_shell_command(ffmpeg)', 'run_shell_command(ffprobe)'])];
-    else args = ['run', ...(full ? ['--auto'] : []), full_prompt];
+    // '{prompt}' marks where the message goes; without it, it is the last argument
+    const args = argv.some((a) => a.includes('{prompt}')) ? argv.map((a) => a.split('{prompt}').join(full_prompt)) : [...argv, full_prompt];
     const proc = spawn(bin, args, { cwd: this.root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, KADR_EDITOR: '1', NO_COLOR: '1' } });
     this.proc = proc;
     let out = '';
@@ -286,14 +305,16 @@ ${skills.map((k) => `- ${k.name}: ${k.description} (${k.file})`).join('\n')}` : 
   }
 
   /** Claude Code, headless, with its stream-json events. */
-  runClaude(bin, reply, prompt, { model, full }) {
+  runClaude(bin, reply, prompt, { model, full, env: extraEnv }) {
     const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--append-system-prompt', SYSTEM];
     if (this.state.sessionId) args.push('--resume', this.state.sessionId);
     if (model) args.push('--model', model);
     if (full) args.push('--permission-mode', 'bypassPermissions');
     else args.push('--permission-mode', 'acceptEdits', '--allowedTools', ...SAFE_TOOLS);
 
-    const proc = spawn(bin, args, { cwd: this.root, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, KADR_EDITOR: '1' } });
+    const env = { ...process.env, KADR_EDITOR: '1', ...(extraEnv || {}) };
+    if (extraEnv) delete env.ANTHROPIC_API_KEY; // the other service's token must win
+    const proc = spawn(bin, args, { cwd: this.root, stdio: ['pipe', 'pipe', 'pipe'], env });
     this.proc = proc;
     proc.stdin.end(prompt);
 

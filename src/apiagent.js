@@ -29,7 +29,7 @@ const TOOLS = [
 const LIMITED_CMDS = new Set(['kadr', 'ffmpeg', 'ffprobe', 'ls', 'cat', 'head', 'tail', 'wc', 'file', 'mkdir', 'cp', 'mv', 'find', 'grep']);
 
 /** Split a command line into argv (quotes and backslashes; no shell features). */
-function splitArgs(s) {
+export function splitArgs(s) {
   const out = [];
   let cur = '';
   let q = null;

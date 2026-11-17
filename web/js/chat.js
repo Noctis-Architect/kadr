@@ -97,7 +97,7 @@ function paintControls() {
     ? 'Full access: the agent may run any command without asking. Click to limit it to project files + kadr/ffmpeg.'
     : 'Limited: the agent can edit project files and run kadr / ffmpeg only. Click for full access.';
   modelSel.value = model;
-  modelSel.hidden = info.agent && info.agent !== 'claude';
+  modelSel.hidden = (info.agent && info.agent !== 'claude') || !!info.claudeVia;
   whoName.textContent = info.agentName ? `${info.agentName}${info.apiModel ? ` · ${info.apiModel}` : ''}` : 'Chat';
 }
 
