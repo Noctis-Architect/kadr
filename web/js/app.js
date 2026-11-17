@@ -11,6 +11,7 @@ import { render as renderBin, importFiles, addText } from './bin.js';
 import { openExport } from './exporter.js';
 import { loadChat, focusChat } from './chat.js';
 import { openProjects } from './projects.js';
+import './compedit.js';
 import { splitAtPlayhead, deleteSelected, duplicateSelected, addMarker, addTrack, copySelected, paste, nudge, rippleTrim, jumpKey, clipById, isLocked } from './ops.js';
 import { toggleGuides } from './viewer.js';
 
@@ -78,6 +79,7 @@ function connect() {
       if (m.root !== S.root) { flushSave(); location.reload(); }
     } else if (m.type === 'asset') {
       reloadAsset(m.path);
+      emit('asset', m.path);
       if (/\.html?$/.test(m.path)) { S.compErrors.delete(m.path); flashExternal(`${basename(m.path)} updated`); }
     } else if (m.type === 'media') {
       loadMedia();

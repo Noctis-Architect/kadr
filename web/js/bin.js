@@ -1,6 +1,7 @@
 import { S, on, emit, toast } from './state.js';
 import { $, h, svg, ICON, basename, fmtDur, upload, api } from './util.js';
 import { addClip } from './ops.js';
+import { openCompEditor } from './compedit.js';
 
 const root = $('#bin');
 const uploads = new Map();
@@ -33,7 +34,8 @@ function item(m) {
       dblclick: () => addClip(m.path, S.t),
       contextmenu: (e) => { e.preventDefault(); api('/api/reveal', { path: m.path, select: true }).catch(() => {}); },
     },
-  }, th, h('div.nm', {}, h('b', {}, basename(m.path)), h('span', { class: m.error ? 'bad' : '' }, dir && dir !== `${m.kind === 'html' ? 'comps' : 'media'}/` ? `${dir} · ${meta}` : meta)));
+  }, th, h('div.nm', {}, h('b', {}, basename(m.path)), h('span', { class: m.error ? 'bad' : '' }, dir && dir !== `${m.kind === 'html' ? 'comps' : 'media'}/` ? `${dir} · ${meta}` : meta)),
+  m.kind === 'html' ? h('button.btn.ghost.sm.bin-edit', { title: 'Edit visually: text, images, timings', on: { click: (e) => { e.stopPropagation(); openCompEditor(m.path); }, dblclick: (e) => e.stopPropagation() } }, 'Edit') : null);
 }
 
 export function render() {
