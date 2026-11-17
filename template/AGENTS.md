@@ -33,7 +33,9 @@ No API keys are involved: you are the AI, and the files are the interface.
 
 "This clip", "here" and "the selected one" refer to `.kadr/state.json`
 (`selection` holds clip ids, `playhead` is in seconds, `in`/`out` is the marked
-range). Read it with `kadr state`.
+range, `part` is a part of a composition the user picked on the timeline:
+its `src` file and `key`, an element's `data-part` name (`p:Title`), `#id` or
+`.class:tag`). "This part" means that element in that file. Read it with `kadr state`.
 
 ## project.json
 
@@ -180,6 +182,25 @@ plus a one-line `<meta name="kadr:description" content="...">`.
 - `<img data-prop-src="logo">` gets its src set
 - every primitive prop is also a CSS variable on `:root`: `var(--accent)`
 Make comps reusable through props rather than copying files.
+
+### Keep comps editable in the GUI (the user edits them too)
+The editor splits every composition into **parts** on the timeline (one row per
+animated element) and lets the user change text, images, colors, size, timing,
+speed and easing with the mouse. Those edits are written straight into this same
+.html file as small, exact changes (a number, a word, one style property), so
+**re-read the file before editing it**: the values may have changed since you wrote them.
+Write comps so that the GUI can find each part:
+- One element per visible part, with a name: `<h1 class="title" data-part="Title">`.
+  The name is what the user sees on the timeline row.
+- Text in the markup or in a prop (`data-prop`), not built up in a script string.
+- Timings as plain numbers: CSS `animation: rise .8s ease-out .3s both;` or
+  `kadr.progressIn(t, 0.3, 1.1, 'outCubic')` / `kadr.interp(t, [0.3, 1.1], …)`.
+  Computed times (`a + i * 0.08`, `start + 0.2`) work but can't be dragged.
+- In scripts, look elements up by id (`$('title')`, `getElementById('title')`,
+  or `const title = $('title')`) so each timing is tied to its part. A
+  `// comment` on the line above a timing becomes its name in the editor.
+- Colors and sizes in CSS rules or `style=""`, as values (`#f5ecdb`, `64px`);
+  shared colors as `:root` variables.
 
 ### Runtime API
 `kadr.time`, `kadr.duration`, `kadr.progress`, `kadr.width`, `kadr.height`,

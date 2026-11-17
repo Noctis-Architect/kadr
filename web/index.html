@@ -10,7 +10,7 @@
 <body>
 <header class="top">
   <div class="brand" title="kadr"><span class="mark"></span></div>
-  <div class="proj" id="projName">—</div>
+  <button class="proj-btn" id="projBtn" title="Projects: recent, open, new  Ctrl+O"><span class="proj" id="projName">—</span><svg viewBox="0 0 16 16"><path d="m4.5 6.5 3.5 3.5 3.5-3.5"/></svg></button>
   <div class="status" id="status"><span class="dot"></span><span class="st-text"></span></div>
   <div class="grow"></div>
   <div class="pills" id="pills"></div>
@@ -79,6 +79,7 @@
     <div class="tl-inner" id="tlInner">
       <div class="tl-ruler-row"><div class="tl-corner" id="tlCorner"></div><canvas id="tlRuler"></canvas></div>
       <div id="tlRows"></div>
+      <div id="tlParts" class="tl-parts" hidden></div>
       <div id="tlMarks"></div>
       <div class="tl-range" id="tlRange"></div>
       <div class="tl-snap" id="tlSnap"></div>

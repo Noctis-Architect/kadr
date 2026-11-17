@@ -14,6 +14,7 @@ export const S = {
   playing: false,
   sel: new Set(), // clip ids
   marker: null, // selected marker id
+  part: null, // { clip, key }: a part of a composition clip (parts.js)
   tool: 'select',
   snap: true,
   pps: 80, // timeline pixels per second
@@ -144,6 +145,8 @@ export function publishState() {
       selection: [...S.sel],
       selectedClips: p.clips.filter((c) => S.sel.has(c.id)).map((c) => ({ id: c.id, track: c.track, type: c.type, src: c.src, start: Math.round(c.start * 1000) / 1000, end: Math.round((c.start + c.duration) * 1000) / 1000 })),
       marker: S.marker ? p.markers.find((m) => m.id === S.marker) || null : null,
+      // a part of a composition clip picked on the timeline (an element in its .html)
+      part: S.part ? { clip: S.part.clip, src: p.clips.find((c) => c.id === S.part.clip)?.src, key: S.part.key } : null,
       in: S.inPt,
       out: S.outPt,
       clipsUnderPlayhead: p.clips.filter((c) => S.t >= c.start && S.t < c.start + c.duration).map((c) => c.id),

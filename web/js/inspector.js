@@ -1,6 +1,10 @@
 import { tc, clipEnd, FITS, sourceSpan, isAnimated, EASES } from '/shared/model.js';
 import { S, on, live, commit, seek, select, duration, snapFrame } from './state.js';
 import { $, h, svg, ICON, fmtNum, clipName, api, drag } from './util.js';
+import { openCompEditor } from './compedit.js';
+import { partView, currentPart } from './parts.js';
+import { pickImage } from './picker.js';
+import { IMG_RE, relPath } from '/shared/htmlsrc.js';
 import {
   clipById, deleteSelected, duplicateSelected, splitAtPlayhead, detachAudio, mediaDuration, setSpeed,
   getProp, setProp, toggleKey, keyAt, clearKeys, setEaseHere, keyTimes, jumpKey, localT, prevAdjacent, addDissolve, dipToColor,
@@ -277,11 +281,37 @@ function propField(c, k, def) {
   const label = nice(k);
   const sample = c.props?.[k] ?? def;
   if (ENUMS[k]) return selectField(label, ENUMS[k], get, set);
+  if (typeof sample === 'string' && IMG_RE.test(sample.trim())) return imageField(c, label, get, set);
   if (typeof sample === 'boolean') return segField(label, [[true, 'on'], [false, 'off']], get, set);
   if (typeof sample === 'number') return numField(label, get, set, { step: STEPS[k] ?? (Math.abs(sample) >= 10 ? 1 : 0.05), digits: 3 });
   if (typeof sample === 'string' && (/^#[0-9a-f]{3,8}$/i.test(sample) || /color|accent|bg|ink/i.test(k))) return colorField(label, get, set);
   if (typeof sample === 'object' && sample) return textField(label, () => JSON.stringify(get()), (v) => { try { set(JSON.parse(v)); } catch { /* typing */ } });
   return textField(label, get, set, { area: LONG_TEXT.includes(k) });
+}
+
+function imageField(c, label, get, set) {
+  const dir = c.src.startsWith('@kadr/') ? null : c.src.split('/').slice(0, -1).join('/');
+  const toProject = (v) => {
+    if (v.startsWith('/p/')) return decodeURIComponent(v.slice(3));
+    const parts = dir ? dir.split('/') : [];
+    for (const seg of v.split('/')) { if (seg === '..') parts.pop(); else if (seg && seg !== '.') parts.push(seg); }
+    return parts.join('/');
+  };
+  const th = h('div.ce-img');
+  const name = h('span');
+  const refresh = () => {
+    const v = String(get() ?? '');
+    th.style.backgroundImage = v ? `url("/p/${toProject(v).split('/').map(encodeURIComponent).join('/')}")` : '';
+    name.textContent = v.split('/').pop() || 'none';
+    name.title = v;
+  };
+  fields.push(refresh);
+  refresh();
+  const btn = h('button.btn.sm', { on: { click: async () => {
+    const p = await pickImage({ current: toProject(String(get() ?? '')), title: `Replace ${label.toLowerCase()}` });
+    if (p) commit(() => set(dir == null ? `/p/${p.split('/').map(encodeURIComponent).join('/')}` : relPath(dir, p)));
+  } } }, 'Replace');
+  return h('div.f', {}, h('label.static', {}, label), h('div.ce-imgrow.mini', {}, th, h('div.ce-imgmeta', {}, name), btn));
 }
 
 function propsSection(c, info) {
@@ -308,8 +338,10 @@ function propsSection(c, info) {
     commit(() => { c.props = { ...(c.props || {}), [n]: '' }; });
   } } }, '+ Add');
   const customized = Object.keys(c.props || {}).some((k) => k in schema);
+  const visual = h('button.btn.sm.ce-open', { title: 'Open this composition full size: click text and images to change them, drag animation timings  (or double-click the clip)', on: { click: () => openCompEditor(c.src, c.id) } }, svg(ICON.code), 'Edit visually');
   return sec([info?.title || 'Props', h('span', { style: { display: 'flex', gap: '2px' } },
     customized ? h('button.btn.ghost.sm', { title: 'Back to the template defaults', on: { click: () => commit(() => { const o = {}; for (const [a, b] of Object.entries(c.props || {})) if (!(a in schema)) o[a] = b; c.props = o; }) } }, 'Defaults') : null, add)],
+    visual,
     ...known.map((k) => propField(c, k, schema[k])), ...rows,
     !keys.length ? h('div.hint', {}, 'This composition declares no props. Add some, or ask the chat to make it configurable.') : null,
     info?.description ? h('div.hint', { style: { marginTop: '8px' } }, info.description) : null,
@@ -343,6 +375,20 @@ function render(o) {
   const m = S.marker ? S.project.markers.find((x) => x.id === S.marker) : null;
   const key = c ? `clip:${c.id}:${c.type}:${c.src}:${c.volume > 1}:${Object.keys(c.props || {}).join(',')}:${Object.keys(c.keys || {}).join(',')}:${!!prevAdjacent(c)}:${c.xfade > 0}:${S.media.has(c.src) || S.templates.has(c.src)}`
     : m ? `marker:${m.id}` : sel.length > 1 ? `multi:${sel.join(',')}` : `project:${S.project.width}x${S.project.height}:${S.project.clips.length}`;
+  const part = c ? currentPart() : null;
+  if (part) {
+    const pkey = `part:${c.id}:${part.p.key}:${part.e.hash}:${JSON.stringify(c.props || {})}`;
+    if (pkey === built && o !== 'force') return;
+    const animate = !built.startsWith('part:');
+    built = pkey;
+    builtObj = part.p;
+    fields = [];
+    const top = root.scrollTop;
+    root.classList.toggle('anim-in', animate);
+    root.replaceChildren(...partView().filter(Boolean));
+    if (!animate) root.scrollTop = top;
+    return;
+  }
   const obj = c || m || S.project;
   if (key === built && obj === builtObj && o !== 'force') {
     for (const f of fields) f();
@@ -364,3 +410,4 @@ on('project', () => render());
 on('time', () => { if (S.sel.size === 1) for (const f of fields) f(); });
 on('select', () => render());
 on('media', () => render('force'));
+on('part-changed', () => render('force'));
