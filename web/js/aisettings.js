@@ -16,6 +16,7 @@ const PAGES = [
   ['speech', 'Voice'],
   ['transcribe', 'Transcripts'],
   ['keys', 'API keys'],
+  ['connect', 'Use from your agents'],
 ];
 const ABOUT = {
   agent: ['Chat agent', 'Edits your video when you write in the chat.'],
@@ -62,7 +63,7 @@ export async function openAiSettings(onSaved, startPage = 'overview') {
     }
     return { level: 'ok', text: AGENTS[cur.agent].name };
   }
-  const statusOf = (k) => (k === 'agent' ? agentStatus() : k === 'keys' ? null : k === 'overview' ? null : svcStatus(k));
+  const statusOf = (k) => (k === 'agent' ? agentStatus() : k === 'connect' ? (conn?.targets?.some((t) => t.connected) ? { level: 'ok', text: '' } : null) : k === 'keys' ? null : k === 'overview' ? null : svcStatus(k));
 
   // ---------- saving ----------
   async function save(patch, msg) {
@@ -266,6 +267,38 @@ export async function openAiSettings(onSaved, startPage = 'overview') {
     return [h('h3', {}, ABOUT[kind][0]), h('p.hint', {}, ABOUT[kind][1]), ...servicePicker(kind)];
   }
 
+  /** Connect kadr (as an MCP server) to the user's own agents. */
+  let conn = null;
+  async function loadConn() { try { conn = await api('/api/connect'); } catch (e) { toast(e.message, true); } render(); }
+  function connectPage() {
+    const kids = [h('h3', {}, 'Use kadr from your own agents'),
+      h('p.hint', {}, 'Connect once, then ask Claude Code, Codex, Gemini, Cursor… for a video right in their own chat or terminal. They create and edit kadr projects, look at frames and export, without this editor open. Nothing is sent anywhere: kadr just adds itself to that app\'s settings on this computer (with a backup).')];
+    if (!conn) { kids.push(h('div.hint', {}, 'Checking your apps…')); if (conn === null) { conn = false; loadConn(); } return kids; }
+    const busy = new Set();
+    const row = (t) => {
+      const btn = h(`button.btn.sm${t.connected ? '' : '.primary'}`, { disabled: !t.detected && !t.connected, on: { click: async () => {
+        if (busy.has(t.id)) return;
+        busy.add(t.id);
+        btn.disabled = true;
+        btn.textContent = t.connected ? 'Disconnecting…' : 'Connecting…';
+        try { conn = await api('/api/connect', { id: t.id, on: !t.connected }); toast(t.connected ? `${t.name} disconnected` : `${t.name} connected: ask it for a video`); } catch (e) { toast(e.message, true); }
+        render();
+      } } }, t.connected ? 'Disconnect' : 'Connect');
+      return h('div.ai-row', {},
+        h('div.ai-row-t', {}, h('b', {}, t.name), h('span', {}, t.error || (t.detected ? t.how : 'Not found on this computer.'))),
+        t.connected ? h('span.ai-pill.ok', {}, 'connected') : null, btn);
+    };
+    kids.push(h('div.ai-rows', {}, ...conn.targets.map(row)));
+    kids.push(h('div.ai-sec', {}, h('h6', {}, 'Then, in that app'),
+      h('div.ai-try', { dir: 'auto' }, 'یه ویدیوی ۳۰ ثانیه‌ای عمودی برای معرفی قهوه‌ی کادر بساز، توی ~/Videos/coffee', h('br'), 'Make a 30-second vertical promo for my café in ~/Videos/coffee'),
+      h('div.hint.ai-under', {}, 'Restart the app (or start a new chat in it) after connecting so it loads kadr.')));
+    kids.push(h('details.ai-adv', {}, h('summary', {}, 'Other apps (Windsurf, Qoder, Zed, LM Studio…)'),
+      h('p.hint', {}, 'Any app that supports MCP servers can use kadr. Add this to its MCP settings:'),
+      h('pre.ai-snippet', {}, conn.snippet),
+      h('button.btn.sm', { on: { click: () => { navigator.clipboard?.writeText(conn.snippet); toast('Copied'); } } }, 'Copy')));
+    return kids;
+  }
+
   function keysPage() {
     const rows = Object.entries(KEYS).map(([id, meta]) => h('div.ai-keyrow', {},
       h('div.ai-row-t', {}, h('b', {}, meta.name), h('span', {}, `Used for: ${meta.uses}`)),
@@ -283,7 +316,7 @@ export async function openAiSettings(onSaved, startPage = 'overview') {
       const st = statusOf(k);
       return h(`button.ai-nav-item${page === k ? '.on' : ''}`, { on: { click: () => go(k) } }, h('span', {}, label), st ? h(`i.dot.${st.level}`) : null);
     }));
-    fill(content, ...(page === 'overview' ? overview() : page === 'agent' ? agentPage() : page === 'keys' ? keysPage() : servicePage(page)));
+    fill(content, ...(page === 'overview' ? overview() : page === 'agent' ? agentPage() : page === 'keys' ? keysPage() : page === 'connect' ? connectPage() : servicePage(page)));
   }
 
   const modal = h('div.modal.ai', { on: { pointerdown: stop } },

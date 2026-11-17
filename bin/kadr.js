@@ -14,6 +14,10 @@ import { Browser } from '../src/chrome.js';
 import { initProject } from '../src/init.js';
 import { lintFile, defaultTargets, builtinTargets } from '../src/lint.js';
 import { genImage, genSpeech, transcribe } from '../src/gen.js';
+import { searchStock, downloadStock } from '../src/stock.js';
+import { readSite } from '../src/site.js';
+import { runMcp } from '../src/mcp.js';
+import { connectStatus, setConnected, manualSnippet } from '../src/connect.js';
 import { loadSettings, publicSettings, service } from '../src/settings.js';
 import { installSkills } from '../src/init.js';
 import { AGENTS } from '../shared/providers.js';
@@ -59,6 +63,19 @@ writes into media/gen/ and prints the path
   gen transcribe <file> [--language fa] [--from t] [--span s] [-o file.json]
                                   words with timing, ready for @kadr/captions.html
   settings                        which agent and services are set up (no keys shown)
+
+use kadr from your own agents (no editor needed)
+  connect [app] [--remove]        add kadr to Claude Code, Codex, Gemini CLI, Qwen Code,
+                                  Cursor, OpenCode or Claude Desktop; no app: show status
+  mcp                             run the MCP server those apps start (stdio)
+
+find media on the internet (free libraries; credits go to media/stock/CREDITS.md)
+  stock search "<words>" [--video] [--orientation landscape|portrait|square]
+               [--count 12] [--from wikimedia|pexels|pixabay|openverse]
+                                  numbered results with size and license
+  stock get <n...>                download results of the last search -> media/stock/
+  site <url> [--images 8]         read a website: text, product facts, brand color,
+                                  images -> brief/site-<host>.md + media/site/<host>/
   skills [--update]               add the editing skills (YouTube, Shorts/Reels, …) to
                                   this project, or refresh them
 
@@ -84,7 +101,7 @@ function parseArgs(argv) {
     else if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=');
       if (v !== undefined) out[k] = v;
-      else if (argv[i + 1] !== undefined && !argv[i + 1].startsWith('--') && !['open', 'demo', 'no-cache', 'json', 'debug', 'strict', 'builtin', 'verbose', 'update'].includes(k)) out[k] = argv[++i];
+      else if (argv[i + 1] !== undefined && !argv[i + 1].startsWith('--') && !['open', 'demo', 'no-cache', 'json', 'debug', 'strict', 'builtin', 'verbose', 'update', 'video', 'remove'].includes(k)) out[k] = argv[++i];
       else out[k] = true;
     } else out._.push(a);
   }
@@ -289,6 +306,60 @@ const commands = {
       return;
     }
     die('usage: kadr gen image|speech|transcribe ...   (see kadr help)');
+  },
+
+  async stock(args) {
+    const [sub, ...rest] = args._;
+    const root = findRoot(args.C || process.cwd()) || process.cwd();
+    const last = path.join(root, '.kadr', 'stock-last.json');
+    if (sub === 'search') {
+      const q = rest.join(' ').trim();
+      if (!q) die('usage: kadr stock search "<words>" [--video] [--orientation portrait]');
+      const r = await searchStock(q, { type: args.video ? 'video' : 'photo', orientation: args.orientation || '', count: Number(args.count) || 12, provider: args.from });
+      await fsp.mkdir(path.dirname(last), { recursive: true });
+      await fsp.writeFile(last, JSON.stringify(r.results));
+      if (r.note) console.log(`note: ${r.note}`);
+      console.log(`${r.results.length} result(s) from ${r.provider}:`);
+      r.results.forEach((x, i) => console.log(`${String(i + 1).padStart(2)}. ${x.type} ${x.width || '?'}x${x.height || '?'}${x.duration ? ` ${Math.round(x.duration)}s` : ''}  ${x.title.slice(0, 70)}
+    ${x.license}${x.author ? ` · by ${x.author.slice(0, 60)}` : ''}`));
+      if (r.results.length) console.log('download with: kadr stock get <number...>   (look at them first with kadr sheet after downloading)');
+      return;
+    }
+    if (sub === 'get') {
+      let list;
+      try { list = JSON.parse(await fsp.readFile(last, 'utf8')); } catch { die('search first: kadr stock search "<words>"'); }
+      const picks = rest.map(Number).filter((n) => n >= 1 && n <= list.length);
+      if (!picks.length) die(`usage: kadr stock get <number...>  (1..${list.length})`);
+      for (const n of picks) console.log(await downloadStock(root, list[n - 1]));
+      return;
+    }
+    die('usage: kadr stock search "<words>" | kadr stock get <n...>');
+  },
+
+  async site(args) {
+    const url = args._[0];
+    if (!url) die('usage: kadr site <url> [--images 8]');
+    const root = projectRoot(args);
+    const r = await readSite(root, url, { images: Number(args.images ?? 8) });
+    console.log(`${r.title || r.siteName}
+${r.description || ''}`.trim());
+    if (r.product) console.log(`product: ${r.product.name || ''}${r.product.price ? ` · ${r.product.price}` : ''}`);
+    if (r.themeColor) console.log(`brand color: ${r.themeColor}`);
+    for (const i of r.images) console.log(`image: ${i.path} (${i.kind})`);
+    console.log(`full notes: ${r.summaryFile}`);
+  },
+
+  async mcp() { runMcp(); await new Promise(() => {}); },
+
+  async connect(args) {
+    const id = args._[0];
+    if (!id) {
+      for (const t of connectStatus()) console.log(`${t.id.padEnd(14)} ${t.connected ? 'connected    ' : t.detected ? 'not connected' : 'not found    '}  ${t.name}${t.error ? `  (${t.error})` : ''}`);
+      console.log(`\nconnect one: kadr connect <app>   ·   remove: kadr connect <app> --remove\nother apps: add this MCP server by hand:\n${manualSnippet()}`);
+      return;
+    }
+    const r = await setConnected(id, !args.remove);
+    console.log(`${r.name}: ${r.connected ? 'connected. Ask it for a video in its own chat.' : 'disconnected'}`);
   },
 
   async settings() {

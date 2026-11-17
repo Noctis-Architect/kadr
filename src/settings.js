@@ -21,7 +21,7 @@ const ENV_KEYS = {
   anthropic: ['ANTHROPIC_API_KEY'], openai: ['OPENAI_API_KEY'], openrouter: ['OPENROUTER_API_KEY'],
   gemini: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'], elevenlabs: ['ELEVENLABS_API_KEY'], groq: ['GROQ_API_KEY'],
   deepseek: ['DEEPSEEK_API_KEY'], zai: ['ZAI_API_KEY', 'ZHIPU_API_KEY'], moonshot: ['MOONSHOT_API_KEY'], qwen: ['DASHSCOPE_API_KEY'],
-  mistral: ['MISTRAL_API_KEY'], xai: ['XAI_API_KEY'],
+  mistral: ['MISTRAL_API_KEY'], xai: ['XAI_API_KEY'], pexels: ['PEXELS_API_KEY'], pixabay: ['PIXABAY_API_KEY'],
 };
 
 export function loadSettings() {
@@ -152,6 +152,8 @@ export async function testKey(provider, key, baseUrl) {
     groq: ['https://api.groq.com/openai/v1/models', bearer],
     ...Object.fromEntries(['deepseek', 'zai', 'moonshot', 'qwen', 'mistral', 'xai'].map((k) => [k, [`${LLM[k].baseUrl}/models`, bearer]])),
     elevenlabs: ['https://api.elevenlabs.io/v1/user', { 'xi-api-key': key }],
+    pexels: ['https://api.pexels.com/v1/curated?per_page=1', { authorization: key }],
+    pixabay: [`https://pixabay.com/api/?key=${encodeURIComponent(key)}&q=test&per_page=3`, {}],
     custom: [`${String(baseUrl || '').replace(/\/+$/, '')}/models`, bearer],
   }[provider];
   if (!url || !url[0].startsWith('http')) return { ok: false, message: 'cannot test this one' };

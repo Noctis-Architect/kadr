@@ -104,6 +104,8 @@ export const KEYS = {
   qwen: { name: 'Qwen (Alibaba Cloud)', url: 'https://bailian.console.alibabacloud.com/?apiKey=1', uses: 'chat agent' },
   mistral: { name: 'Mistral', url: 'https://console.mistral.ai/api-keys', uses: 'chat agent' },
   xai: { name: 'xAI (Grok)', url: 'https://console.x.ai', uses: 'chat agent' },
+  pexels: { name: 'Pexels', url: 'https://www.pexels.com/api/', uses: 'stock photos and videos (free key)' },
+  pixabay: { name: 'Pixabay', url: 'https://pixabay.com/api/docs/', uses: 'stock photos and videos (free key)' },
 };
 
 /** One-line descriptions shown on the choice cards in AI settings. */

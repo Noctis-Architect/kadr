@@ -11,6 +11,8 @@ import { openProjects } from './projects.js';
 import { openGallery } from './gallery.js';
 import { askChat, openAiSettings } from './chat.js';
 import { openGenerate } from './generate.js';
+import { openBrief } from './brief.js';
+import { openStock } from './stockdlg.js';
 import { cutNear, openTransitionPopup } from './transitions.js';
 import { workspaceItems } from './workspace.js';
 import {
@@ -29,6 +31,9 @@ const RECIPES = [
   ['Short clips from a long video', 'بهترین لحظه‌های این ویدیوی بلند رو پیدا کن و ازشون چندتا کلیپ کوتاه بساز.'],
   ['Thumbnail', 'یه تامبنیل یوتیوب برای این ویدیو طراحی کن.'],
   ['Video from a script (voice-over)', 'از این متن یه ویدیو با صدای گوینده و تصویر بساز: '],
+  ['Lyric video for a song', 'برای آهنگ media/… یه ویدیوی متن آهنگ بساز. متن آهنگ اینه:\n'],
+  ['Podcast or interview', 'این پادکست رو ادیت کن: بین گوینده‌ها کات بزن و برای مهمون‌ها لوور‌ترد بذار.'],
+  ['Tutorial from a screen recording', 'این فیلم صفحه رو یه آموزش تمیز کن: زمان‌های مرده رو بگیر و روی جاهای مهم زوم کن.'],
 ];
 
 let actions = {};
@@ -80,6 +85,7 @@ function menus() {
     Insert: [
       { label: 'Text', kbd: 'T', on: addText },
       { label: 'Template…', on: openGallery },
+      { label: 'Photos & videos from the internet…', on: () => openStock() },
       { label: 'Marker', kbd: 'M', on: () => selectMarker(addMarker(S.t)) },
       { label: 'Transition at playhead…', on: () => {
         const c = cutNear(S.t);
@@ -97,11 +103,13 @@ function menus() {
       { label: 'Clear in / out', kbd: 'X', disabled: S.inPt == null && S.outPt == null, on: () => { S.inPt = null; S.outPt = null; renderTimeline(); publishState(); } },
     ],
     AI: [
+      { label: 'New video from a brief…', on: () => openBrief() },
       { label: 'Ask the chat…', kbd: '/', on: () => actions.setTab('chat') },
       { label: 'AI settings…', on: () => openAiSettings() },
       '-',
       { label: 'Generate an image…', on: () => openGenerate('image') },
       { label: 'Generate a voice-over…', on: () => openGenerate('speech') },
+      { label: 'Find photos & videos online…', on: () => openStock() },
       '-',
       { label: 'Ready-made jobs', disabled: true },
       ...RECIPES.map(([label, text]) => ({ label, sub: true, on: () => ask(text) })),

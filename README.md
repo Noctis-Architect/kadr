@@ -8,6 +8,14 @@ shows, and the preview updates as they save.
   with your own login (no API key). You see every step, the frames it renders to
   check its work, and each turn can be undone with one click (checkpoints of
   project.json + comps/). It knows your playhead and selection.
+- **Use it from your own agents**: `kadr connect claude` (or the Connect page in
+  AI settings) registers kadr as an MCP server in Claude Code, Codex, Gemini CLI,
+  Qwen Code, Cursor, OpenCode or Claude Desktop. Then ask that agent for a video
+  in its own chat: it creates and edits kadr projects, looks at frames and
+  exports, without the editor open (`kadr mcp` is the server they start).
+- **Video from a brief**: describe the video, add photos, music, lyrics or your
+  website, and the agent researches, asks what is missing, plans and builds it.
+  Free stock photos and clips (`kadr stock`), website reading (`kadr site`).
 - **Pick your agent**: Claude Code, Codex, Gemini CLI or OpenCode with their
   own logins, or kadr's built-in agent with your API key (Anthropic, OpenAI,
   OpenRouter, Gemini, Ollama, any OpenAI-compatible server). Chat → settings.
@@ -88,6 +96,9 @@ project folder                       kadr serve (Node, 127.0.0.1 only)
 | `src/agent.js` | chat bridge: Claude Code (stream-json), other agent CLIs, checkpoints |
 | `src/apiagent.js` | built-in agent loop over the Anthropic or an OpenAI-compatible API |
 | `src/settings.js` | user settings and keys (outside projects) |
+| `src/mcp.js` | `kadr mcp`: kadr's tools for any MCP agent |
+| `src/connect.js` | `kadr connect`: adds kadr to each agent's MCP settings (with a backup) |
+| `src/stock.js`, `src/site.js` | free stock search and download, website reader |
 | `src/gen.js` | `kadr gen`: images, speech, transcripts |
 | `skills/` | editing skills copied into each project's `.claude/skills/` |
 | `builtin/` | templates served as `@kadr/...` to every project |

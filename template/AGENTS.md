@@ -46,7 +46,10 @@ Read the matching one before you start that kind of edit:
 `captions`, `repurpose-clips` (long video to shorts), `thumbnail`,
 `voiceover-explainer` (video from a script, no camera), `podcast-video`,
 `screencast-tutorial`, `product-promo`, `photo-slideshow`, `montage-highlights`
-(music-driven reels: travel, events, vlogs), `color-look`, `audio-mix`.
+(music-driven reels: travel, events, vlogs), `color-look`, `audio-mix`,
+`lyric-video` (song + timed animated text), `find-media` (stock photos and
+clips from free libraries, reading the user's website), `video-from-brief`
+(a whole video from a description, files and a website; read `brief/brief.json`).
 
 ## Generating media
 
@@ -268,6 +271,10 @@ Ready-made, polished compositions you can use as `src` without copying them.
   exact timing: `"props": {"words": [{"w":"Hello","s":0.0,"e":0.4}, ...]}` (seconds, relative to the clip)
 - `@kadr/wipe.html`: transition. Put it on the top track centered on a cut
   (`start = cut - duration/2`); it covers the frame fully at its midpoint
+- `@kadr/lyrics.html`: song lyrics / timed lines: `"props": {"lines": [{"t":"line","s":1.2,"e":3.8}, ...], "style": "pop|fade|type|karaoke|kinetic|stack"}`
+  (seconds relative to the clip; `*word*` = accent; right-to-left text works)
+- `@kadr/color.html`: full-frame color or gradient (backgrounds, tints at low opacity)
+- `@kadr/flash.html`, `@kadr/iris.html`, `@kadr/stripes.html`: transitions, used like the wipe
 - `@kadr/end-card.html`: end card / call to action
 - `@kadr/quote.html`: quote card (quote, author)
 - `@kadr/logo-reveal.html`: logo reveal; `logo` is an image path (`/p/media/logo.png`), empty for a monogram
@@ -295,6 +302,9 @@ kadr silence <file> [--noise -35] [--min 0.4]   silent ranges (JSON), handy for 
 kadr templates                    built-in compositions and their props
 kadr gen image "<prompt>" | gen speech "<text>" | gen transcribe <file>
 kadr settings                     which generation services are set up
+kadr stock search "<words>" [--video] [--orientation portrait]   free stock photos / clips
+kadr stock get <n...>             download results -> media/stock/ (credits in CREDITS.md)
+kadr site <url>                   read a website -> brief/site-<host>.md + media/site/<host>/
 kadr render [-o renders/x.mp4] [--from t] [--to t] [--crf 18] [--codec h264|h265|prores|av1|vp9]
             [--size 3840x2160] [--loudness -14] [--motion-blur 8]
 ```

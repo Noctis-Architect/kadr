@@ -10,6 +10,9 @@ import { renderProject } from './render.js';
 import { findChrome } from './chrome.js';
 import { AgentBridge, which } from './agent.js';
 import { genImage, genSpeech } from './gen.js';
+import { searchStock, downloadStock } from './stock.js';
+import { readSite } from './site.js';
+import { connectStatus, setConnected, manualSnippet } from './connect.js';
 import { loadSettings, saveSettings, publicSettings, mergeSettings, keyFor, testKey } from './settings.js';
 import { probe } from './media.js';
 import { findRoot } from './project.js';
@@ -316,7 +319,9 @@ export async function startServer({ root: startRoot, port = 4310, host = '127.0.
       } catch (e) { return json(res, 404, { error: e.message }); }
     }
     if (p === '/api/upload' && m === 'POST') {
-      const dir = path.join(root, 'media');
+      // optional sub-folder of media/ (e.g. "brief"), letters, digits, - and _ only
+      const sub = String(url.searchParams.get('dir') || '').replace(/[^\w-]/g, '').slice(0, 40);
+      const dir = path.join(root, 'media', sub);
       await fsp.mkdir(dir, { recursive: true });
       const name = safeName(url.searchParams.get('name'));
       const ext = path.extname(name);
@@ -354,6 +359,43 @@ export async function startServer({ root: startRoot, port = 4310, host = '127.0.
       return res.end();
     }
     if (p === '/api/settings' && m === 'GET') return json(res, 200, { ...publicSettings(loadSettings()), agents: agent.info().agents, local: { piper: !!which('piper'), espeak: !!which('espeak-ng') } });
+    if (p === '/api/connect' && m === 'GET') return json(res, 200, { targets: connectStatus(), snippet: manualSnippet() });
+    if (p === '/api/connect' && m === 'POST') {
+      const b = JSON.parse(await readBody(req, 2e3));
+      await setConnected(String(b.id || ''), !!b.on);
+      return json(res, 200, { targets: connectStatus(), snippet: manualSnippet() });
+    }
+    if (p === '/api/brief' && m === 'POST') {
+      const b = JSON.parse(await readBody(req, 2e5));
+      const brief = b.brief && typeof b.brief === 'object' ? b.brief : {};
+      const dir = path.join(root, 'brief');
+      await fsp.mkdir(dir, { recursive: true });
+      await fsp.writeFile(path.join(dir, 'brief.json'), `${JSON.stringify(brief, null, 2)}\n`);
+      // the same, readable for people
+      const lines = ['# Video brief', ''];
+      for (const [k, v] of Object.entries(brief)) {
+        if (v == null || v === '' || (Array.isArray(v) && !v.length)) continue;
+        lines.push(Array.isArray(v) ? `- **${k}**:\n${v.map((x) => `  - ${typeof x === 'object' ? JSON.stringify(x) : x}`).join('\n')}` : `- **${k}**: ${typeof v === 'object' ? JSON.stringify(v) : String(v).replace(/\n/g, '\n  ')}`);
+      }
+      await fsp.writeFile(path.join(dir, 'brief.md'), `${lines.join('\n')}\n`);
+      return json(res, 200, { path: 'brief/brief.json' });
+    }
+    if (p === '/api/stock/search' && m === 'POST') {
+      const b = JSON.parse(await readBody(req, 4e3));
+      return json(res, 200, await searchStock(String(b.query || '').trim() || 'nature', { type: b.type, orientation: b.orientation, count: b.count, provider: b.provider || undefined }));
+    }
+    if (p === '/api/stock/get' && m === 'POST') {
+      const b = JSON.parse(await readBody(req, 2e4));
+      const rel = await downloadStock(root, b.item);
+      broadcast({ type: 'media' });
+      return json(res, 200, { path: rel });
+    }
+    if (p === '/api/site' && m === 'POST') {
+      const b = JSON.parse(await readBody(req, 4e3));
+      const r = await readSite(root, String(b.url || ''), { images: b.images ?? 8 });
+      broadcast({ type: 'media' });
+      return json(res, 200, r);
+    }
     if (p === '/api/gen' && m === 'POST') {
       const b = JSON.parse(await readBody(req, 2e4));
       let file;

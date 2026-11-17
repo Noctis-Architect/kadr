@@ -17,6 +17,7 @@ import './compedit.js';
 import { splitAtPlayhead, deleteSelected, duplicateSelected, addMarker, addTrack, copySelected, paste, nudge, rippleTrim, jumpKey, clipById, isLocked } from './ops.js';
 import { toggleGuides } from './viewer.js';
 import { initMenubar } from './menubar.js';
+import { openBrief } from './brief.js';
 import { initWorkspace, setTimelineHeight } from './workspace.js';
 
 // ---------- loading ----------
@@ -200,7 +201,7 @@ $('#startImport').onclick = importDialog;
 initWorkspace({ setTab });
 initMenubar({ setTab, importDialog });
 $('#startTemplates').onclick = openGallery;
-$('#startChat').onclick = () => setTab('chat');
+$('#startChat').onclick = () => openBrief();
 $('#splitBtn').onclick = splitAtPlayhead;
 $('#addTextBtn').onclick = addText;
 $('#addMarkerBtn').onclick = () => selectMarker(addMarker(S.t));

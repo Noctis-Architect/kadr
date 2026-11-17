@@ -193,6 +193,7 @@ export class AgentBridge {
   finish(reply) {
     this.proc = null;
     reply.done = true;
+    if (!reply.ms) reply.ms = Date.now() - reply.at;
     this.persist();
     this.emit({ ev: 'done', message: reply });
   }

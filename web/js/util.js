@@ -124,10 +124,10 @@ export async function api(path, body, method = body === undefined ? 'GET' : 'POS
   return j;
 }
 
-export function upload(file, onProgress) {
+export function upload(file, onProgress, dir = '') {
   return new Promise((resolve, reject) => {
     const x = new XMLHttpRequest();
-    x.open('POST', `/api/upload?name=${encodeURIComponent(file.name)}`);
+    x.open('POST', `/api/upload?name=${encodeURIComponent(file.name)}${dir ? `&dir=${encodeURIComponent(dir)}` : ''}`);
     for (const [k, v] of Object.entries(authHeaders())) x.setRequestHeader(k, v);
     x.upload.onprogress = (e) => e.lengthComputable && onProgress?.(e.loaded / e.total);
     x.onload = () => (x.status < 300 ? resolve(JSON.parse(x.responseText)) : reject(new Error(x.responseText)));
