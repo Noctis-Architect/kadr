@@ -1,0 +1,47 @@
+# Quick checks on every push and pull request: the CLI starts, the built-in
+# templates lint clean, and the desktop shell compiles.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check
+        run: for f in bin/*.js src/*.js shared/*.js runtime/*.js scripts/*.mjs; do node --check "$f"; done
+      - name: CLI starts
+        run: node bin/kadr.js help > /dev/null
+      - name: Built-in templates lint clean
+        run: node bin/kadr.js lint --builtin
+
+  desktop:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Placeholder sidecar for cargo check
+        run: |
+          t=$(rustc -vV | sed -n 's/^host: //p')
+          touch "src-tauri/binaries/kadr-node-$t"
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --locked

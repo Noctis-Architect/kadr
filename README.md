@@ -64,6 +64,24 @@ Node 22+, ffmpeg/ffprobe, Chromium or Chrome (`KADR_CHROME=/path` to override).
 cd ~/projects/kadr && npm link      # puts `kadr` on your PATH
 ```
 
+## Desktop app
+
+Installers for Windows, macOS and Linux are on the
+[Releases](https://github.com/Noctis-Architect/kadr/releases) page. The app
+bundles its own Node; you still need ffmpeg and Chrome/Chromium/Edge. It opens
+the last project you used (or makes `~/Documents/kadr/My first video`).
+
+Build it yourself (needs Rust and, on Linux, `libwebkit2gtk-4.1-dev`):
+
+```bash
+npm install
+npm run desktop:dev      # run from source
+npm run desktop:build    # installers in src-tauri/target/release/bundle/
+```
+
+Releases: set `version` in package.json, then `git tag v<version> && git push origin v<version>`.
+GitHub Actions builds every platform and publishes the release.
+
 ## Use
 
 ```bash

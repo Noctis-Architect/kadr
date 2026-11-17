@@ -1,0 +1,156 @@
+# Builds the desktop app for Windows, macOS (Apple Silicon + Intel) and Linux
+# and publishes the installers on the GitHub Releases page.
+#
+# How to release:
+#   1. set "version" in package.json (e.g. 0.2.0) and commit
+#   2. push a tag with the same version:  git tag v0.2.0 && git push origin v0.2.0
+#      (or run this workflow by hand from the Actions tab: it tags v<version>)
+name: Release desktop app
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.release.outputs.result }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: version
+        name: Read version from package.json
+        run: |
+          v=$(node -p "require('./package.json').version")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$v" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version $v (expected v$v)"
+            exit 1
+          fi
+
+      - id: release
+        name: Create draft release
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = `v${process.env.VERSION}`;
+            const releases = await github.paginate(github.rest.repos.listReleases, { owner, repo, per_page: 100 });
+            const old = releases.find((r) => r.tag_name === tag);
+            if (old && !old.draft) {
+              core.setFailed(`release ${tag} is already published: bump "version" in package.json`);
+              return;
+            }
+            if (old) return old.id; // re-run: keep filling the same draft
+            const { data } = await github.rest.repos.createRelease({
+              owner, repo, tag_name: tag, target_commitish: context.sha, name: `kadr ${tag}`, draft: true,
+              body: [
+                '## Downloads',
+                '',
+                '| System | File |',
+                '| --- | --- |',
+                '| Windows 10/11 | `kadr_*_x64-setup.exe` |',
+                '| macOS, Apple Silicon (M1 and later) | `kadr_*_aarch64.dmg` |',
+                '| macOS, Intel | `kadr_*_x64.dmg` |',
+                '| Linux: Debian / Ubuntu | `kadr_*_amd64.deb` |',
+                '| Linux: Fedora / openSUSE | `kadr-*.x86_64.rpm` |',
+                '| Linux: any distribution | `kadr_*_amd64.AppImage` |',
+                '',
+                'kadr needs **ffmpeg** for import and export, and Chrome, Chromium or Edge to render compositions.',
+                '',
+                'The macOS build is not notarized yet: the first time, right-click kadr.app and choose **Open**',
+                '(or run `xattr -cr /Applications/kadr.app`).',
+              ].join('\n'),
+            });
+            return data.id;
+
+  build:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
+          - name: Windows x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+          - name: macOS Apple Silicon
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+          - name: macOS Intel
+            os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+
+      - run: npm ci
+
+      - name: Bundle Node.js for ${{ matrix.target }}
+        run: node scripts/fetch-node.mjs --target ${{ matrix.target }}
+
+      - name: Build and upload to the release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          tauriScript: npx tauri
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+  publish:
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: Number(process.env.RELEASE_ID),
+              draft: false,
+              make_latest: 'true',
+            });

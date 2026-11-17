@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>kadr</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #09090a; color: #ececef; font: 13px system-ui, -apple-system, "Segoe UI", "Noto Sans", sans-serif; overflow: hidden; user-select: none; -webkit-user-select: none; }
+  .top { position: fixed; inset: 0 0 auto 0; height: 44px; background: #0f0f11; }
+  .wrap { height: 100%; display: grid; place-items: center; }
+  .box { display: grid; justify-items: center; gap: 14px; }
+  svg { width: 56px; height: 56px; animation: breathe 1.6s ease-in-out infinite; }
+  .bar { width: 120px; height: 2px; border-radius: 2px; background: #1c1c20; overflow: hidden; }
+  .bar i { display: block; width: 40%; height: 100%; background: #e8ff59; border-radius: 2px; animation: slide 1.1s ease-in-out infinite; }
+  .err { display: none; max-width: min(720px, 90vw); text-align: left; }
+  .err b { display: block; margin-bottom: 8px; color: #ff6b5b; }
+  .err pre { margin: 0; padding: 12px; max-height: 50vh; overflow: auto; background: #141417; border-radius: 8px; color: #a1a1aa; font: 11.5px ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; user-select: text; -webkit-user-select: text; }
+  .err button { margin-top: 12px; height: 28px; padding: 0 14px; border: 0; border-radius: 7px; background: #1c1c20; color: #ececef; font: inherit; cursor: pointer; }
+  .err button:hover { background: #26262b; }
+  .failed .err { display: block; }
+  .failed .bar, .failed svg { display: none; }
+  @keyframes breathe { 50% { opacity: .55; transform: scale(.96); } }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+  @media (prefers-reduced-motion: reduce) { svg, .bar i { animation: none; } }
+</style>
+</head>
+<body>
+<div class="top" data-tauri-drag-region></div>
+<div class="wrap" data-tauri-drag-region>
+  <div class="box">
+    <svg viewBox="0 0 32 32"><path d="M7 7v18M25 7v18M7 7h5M7 25h5M25 7h-5M25 25h-5" stroke="#e8ff59" stroke-width="2.6" fill="none" stroke-linecap="round"/><path d="M13.5 11.5v9l7-4.5z" fill="#e8ff59"/></svg>
+    <div class="bar"><i></i></div>
+    <div class="err"><b>kadr could not start its editor server</b><pre id="log"></pre><button id="quit">Close</button></div>
+  </div>
+</div>
+<script>
+  window.kadrFail = (msg) => {
+    document.body.classList.add('failed');
+    document.getElementById('log').textContent = msg;
+  };
+  document.getElementById('quit').onclick = () => window.__TAURI__?.window.getCurrentWindow().close();
+</script>
+</body>
+</html>

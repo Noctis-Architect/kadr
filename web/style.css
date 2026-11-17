@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg: #09090a;
   --panel: #0f0f11;
   --panel-2: #141417;
@@ -931,3 +932,18 @@ body.razor .clip .h { background: none; }
 #chat.drop .composer .box { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(232, 255, 89, .12); }
 .connect-tip { display: inline-flex; align-items: center; gap: 6px; margin: 14px auto 0; font-size: 11.5px; }
 .connect-tip svg { width: 13px; height: 13px; }
+
+/* desktop app (Tauri): the header is the window's title bar */
+.desktop .top { user-select: none; -webkit-user-select: none; }
+.desktop.os-other .top { padding-right: 0; }
+.desktop.os-mac .top { padding-left: 82px; }
+.wc { display: flex; align-self: stretch; margin-left: 10px; }
+.wc-btn { width: 46px; border: 0; padding: 0; background: none; color: var(--muted); display: grid; place-items: center; cursor: default; transition: background .12s, color .12s; }
+.wc-btn svg { width: 14px; height: 14px; stroke-width: 1.2; }
+.wc-btn:hover { background: var(--hover); color: var(--text); }
+.wc-btn:active { background: var(--raise); }
+.wc-close:hover { background: #e5484d; color: #fff; }
+.wc-close:active { background: #c13a3f; color: #fff; }
+/* WebKitGTK draws <select> with the GTK theme (white); draw it ourselves */
+.desktop select { -webkit-appearance: none; appearance: none; padding-right: 22px !important; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4.5 6.5 3.5 3.5 3.5-3.5' fill='none' stroke='%238b8b93' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important; background-repeat: no-repeat !important; background-position: right 5px center !important; background-size: 14px !important; }
+.desktop select option { background: var(--panel-2); color: var(--text); }

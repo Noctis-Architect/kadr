@@ -12,18 +12,28 @@ const CANDIDATES = [
 const MAC = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
 ];
+// Windows: Chrome if installed, else Edge (every Windows 10/11 has it).
+const WIN = () => {
+  const roots = [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA].filter(Boolean);
+  const rel = ['Google\\Chrome\\Application\\chrome.exe', 'Chromium\\Application\\chrome.exe',
+    'Microsoft\\Edge\\Application\\msedge.exe', 'BraveSoftware\\Brave-Browser\\Application\\brave.exe'];
+  return rel.flatMap((r) => roots.map((d) => path.join(d, r)));
+};
 
 export function findChrome() {
   if (process.env.KADR_CHROME) return process.env.KADR_CHROME;
+  const win = process.platform === 'win32';
   const dirs = (process.env.PATH || '').split(path.delimiter);
   for (const name of CANDIDATES) {
     for (const d of dirs) {
-      const p = path.join(d, name);
+      const p = path.join(d, win ? `${name}.exe` : name);
       try { fs.accessSync(p, fs.constants.X_OK); return p; } catch { /* next */ }
     }
   }
-  return MAC.find((p) => fs.existsSync(p)) || null;
+  return (win ? WIN() : MAC).find((p) => fs.existsSync(p)) || null;
 }
 
 const FLAGS = [

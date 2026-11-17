@@ -88,6 +88,22 @@ H.264، H.265، ProRes 422 HQ، AV1 و VP9، تا 4K. یکسان‌سازی بل
 - ffmpeg و ffprobe
 - Chromium یا Chrome (برای مسیر دیگه: `KADR_CHROME=/path`)
 
+## اپ دسکتاپ (ویندوز، مک، لینوکس)
+
+نصب‌کننده‌ها توی بخش [Releases](https://github.com/Noctis-Architect/kadr/releases) هستن. اپ Node رو خودش داره؛ فقط ffmpeg و یکی از Chrome/Chromium/Edge لازمه. موقع باز شدن، آخرین پروژه‌ای که باز کرده بودی رو باز می‌کنه (یا یه پروژه‌ی تازه توی `~/Documents/kadr` می‌سازه).
+
+</div>
+
+```bash
+npm install
+npm run desktop:dev      # اجرا از روی سورس
+npm run desktop:build    # ساخت نصب‌کننده در src-tauri/target/release/bundle/
+```
+
+<div dir="rtl">
+
+برای انتشار نسخه‌ی جدید: `version` رو توی package.json عوض کن، بعد `git tag v<version> && git push origin v<version>`. GitHub Actions برای همه‌ی سیستم‌ها بیلد می‌گیره و ریلیز رو منتشر می‌کنه.
+
 ## نصب
 
 </div>

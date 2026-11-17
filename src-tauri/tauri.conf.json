@@ -1,0 +1,79 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "kadr",
+  "mainBinaryName": "kadr",
+  "version": "../package.json",
+  "identifier": "dev.kadr.app",
+  "build": {
+    "frontendDist": "splash"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "kadr",
+        "url": "index.html",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 600,
+        "center": true,
+        "decorations": false,
+        "shadow": true,
+        "resizable": true,
+        "dragDropEnabled": false,
+        "backgroundColor": "#09090a",
+        "theme": "Dark"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "appimage", "nsis", "dmg", "app"],
+    "category": "Video",
+    "shortDescription": "Local video editor that coding agents can drive",
+    "longDescription": "kadr is a local, minimal video editor that coding agents (Claude Code, Codex, Aider, ...) can drive through plain files. HTML/CSS/JS motion graphics, ffmpeg export.",
+    "copyright": "MIT",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": ["binaries/kadr-node"],
+    "resources": {
+      "../package.json": "app/package.json",
+      "../bin/": "app/bin/",
+      "../src/": "app/src/",
+      "../shared/": "app/shared/",
+      "../runtime/": "app/runtime/",
+      "../builtin/": "app/builtin/",
+      "../template/": "app/template/",
+      "../skills/": "app/skills/",
+      "../web/": "app/web/"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["ffmpeg", "gstreamer1.0-plugins-good", "gstreamer1.0-libav"],
+        "recommends": ["chromium"]
+      },
+      "rpm": {
+        "depends": ["ffmpeg"]
+      }
+    },
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  }
+}
