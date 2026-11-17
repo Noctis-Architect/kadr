@@ -4,6 +4,7 @@ import { $, h, svg, ICON, fmtNum, clipName, api, drag } from './util.js';
 import { openCompEditor } from './compedit.js';
 import { partView, currentPart } from './parts.js';
 import { pickImage } from './picker.js';
+import { transitionPicker } from './transitions.js';
 import { IMG_RE, relPath } from '/shared/htmlsrc.js';
 import {
   clipById, deleteSelected, duplicateSelected, splitAtPlayhead, detachAudio, mediaDuration, setSpeed,
@@ -232,12 +233,8 @@ function viewClip(c) {
   const prev = prevAdjacent(c);
   if (prev || c.xfade > 0) {
     out.push(sec('Transition in',
-      numField('Dissolve', () => c.xfade || 0, (v) => { c.xfade = Math.min(v, c.duration, prev ? prev.duration : v); }, { step: 1 / S.project.fps, unit: 's', min: 0, digits: 2 }),
-      h('div.actions', {},
-        h('button.btn.sm', { title: 'Cross dissolve from the previous clip, centred on the cut', on: { click: () => addDissolve(c, c.xfade || 0.5) } }, 'Cross dissolve'),
-        h('button.btn.sm', { title: 'Fade the previous clip out and this one in', on: { click: () => dipToColor(c, 0.6) } }, 'Dip to black'),
-        c.xfade > 0 ? h('button.btn.ghost.sm', { on: { click: () => commit(() => { c.xfade = 0; }) } }, 'Remove') : null),
-      h('div.hint', {}, prev ? `From ${clipName(prev)}. Both clips play ${((c.xfade || 0.5) / 2).toFixed(2)}s past the cut (holding a frame if the media runs out).` : 'No clip ends exactly where this one starts, so the dissolve is inactive.')));
+      transitionPicker(c),
+      h('div.hint', {}, prev ? `From ${clipName(prev)}. Click a style to try it; the preview shows it right away.` : 'No clip ends exactly where this one starts, so the transition is inactive.')));
   }
   out.push(sec('Fades',
     h('div.row2', {},

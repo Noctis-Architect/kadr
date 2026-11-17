@@ -11,6 +11,8 @@ import { openProjects } from './projects.js';
 import { openGallery } from './gallery.js';
 import { askChat, openAiSettings } from './chat.js';
 import { openGenerate } from './generate.js';
+import { cutNear, openTransitionPopup } from './transitions.js';
+import { workspaceItems } from './workspace.js';
 import {
   splitAtPlayhead, deleteSelected, duplicateSelected, addMarker, addTrack, copySelected, paste, clipById, isLocked,
 } from './ops.js';
@@ -79,6 +81,13 @@ function menus() {
       { label: 'Text', kbd: 'T', on: addText },
       { label: 'Template…', on: openGallery },
       { label: 'Marker', kbd: 'M', on: () => selectMarker(addMarker(S.t)) },
+      { label: 'Transition at playhead…', on: () => {
+        const c = cutNear(S.t);
+        if (!c) return toast('No cut between two clips yet: put two clips back to back on a track');
+        select([c.id]);
+        const r = $('#stage')?.getBoundingClientRect();
+        openTransitionPopup(c, r ? r.left + r.width / 2 - 170 : 200, r ? r.top + 40 : 120);
+      } },
       '-',
       { label: 'Video track', on: () => addTrack('video') },
       { label: 'Audio track', on: () => addTrack('audio') },
@@ -97,6 +106,7 @@ function menus() {
       { label: 'Ready-made jobs', disabled: true },
       ...RECIPES.map(([label, text]) => ({ label, sub: true, on: () => ask(text) })),
     ],
+    Window: workspaceItems(),
     Help: [
       { label: 'Keyboard shortcuts', on: () => $('#helpBtn')?.click() },
       { label: 'Tip: right-click clips, gaps and tracks for more', disabled: true },

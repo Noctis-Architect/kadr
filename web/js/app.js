@@ -17,6 +17,7 @@ import './compedit.js';
 import { splitAtPlayhead, deleteSelected, duplicateSelected, addMarker, addTrack, copySelected, paste, nudge, rippleTrim, jumpKey, clipById, isLocked } from './ops.js';
 import { toggleGuides } from './viewer.js';
 import { initMenubar } from './menubar.js';
+import { initWorkspace, setTimelineHeight } from './workspace.js';
 
 // ---------- loading ----------
 async function loadMedia() {
@@ -196,6 +197,7 @@ $('#templatesBtn').onclick = openGallery;
 $('#startArt').innerHTML = ART.stage();
 function importDialog() { const inp = h('input', { type: 'file', multiple: true, accept: 'video/*,audio/*,image/*,.html' }); inp.onchange = () => importFiles([...inp.files]); inp.click(); }
 $('#startImport').onclick = importDialog;
+initWorkspace({ setTab });
 initMenubar({ setTab, importDialog });
 $('#startTemplates').onclick = openGallery;
 $('#startChat').onclick = () => setTab('chat');
@@ -229,12 +231,12 @@ splitter.addEventListener('pointerdown', (e) => {
     splitter.classList.remove('drag');
     window.removeEventListener('pointermove', mm);
     window.removeEventListener('pointerup', mu);
-    try { localStorage.setItem('kadr.tlh', document.documentElement.style.getPropertyValue('--tl-h')); } catch { /* private mode */ }
+    setTimelineHeight(parseFloat(document.documentElement.style.getPropertyValue('--tl-h')) || 300);
   };
   window.addEventListener('pointermove', mm);
   window.addEventListener('pointerup', mu);
 });
-try { const v = localStorage.getItem('kadr.tlh'); if (v) document.documentElement.style.setProperty('--tl-h', v); } catch { /* ignore */ }
+// the timeline height is part of the workspace (workspace.js)
 
 // ---------- file drop anywhere ----------
 const veil = $('#dropVeil');

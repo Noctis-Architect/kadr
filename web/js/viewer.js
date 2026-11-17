@@ -1,7 +1,7 @@
 // Preview: stacks real <video>/<img>/<iframe> elements on a canvas-sized stage
 // and keeps them in sync with the playhead. Compositions are seeked through
 // their kadr runtime, so the preview shows exactly what the export renders.
-import { placement, fadeAt, clamp, tc, sourceTime, cssFilter, cssCrop, transitions, clipWindow, resolveAt } from '/shared/model.js';
+import { placement, fadeAt, clamp, tc, sourceTime, cssFilter, cssCrop, transitions, clipWindow, resolveAt, transitionOffset } from '/shared/model.js';
 import { S, on, emit, live, commit, select, toggle, seek, fps, duration, snapFrame, toast } from './state.js';
 import { $, h, mediaUrl, compUrl, drag, api } from './util.js';
 import { clipById, trackById, getProp, setProp } from './ops.js';
@@ -124,7 +124,7 @@ class Layer {
     const el = this.el;
     const w = clipWindow(c, tr);
     const active = t >= w.s && t < w.e;
-    const rc = resolveAt(c, t);
+    let rc = resolveAt(c, t);
     const mdur = S.media.get(c.src)?.duration || Infinity;
     const raw = sourceTime(c, t);
     const local = clamp(raw, 0, Number.isFinite(mdur) ? mdur - 0.02 : Infinity);
@@ -134,6 +134,8 @@ class Layer {
     if (visible) {
       const { width: W, height: H } = S.project;
       const a = rc.opacity * fadeAt(c, t, tr);
+      const off = transitionOffset(c, t, tr, W, H);
+      if (off.dx || off.dy) rc = { ...rc, x: (rc.x || 0) + off.dx, y: (rc.y || 0) + off.dy };
       el.style.opacity = a.toFixed(3);
       el.style.zIndex = z;
       const f = cssFilter(c);

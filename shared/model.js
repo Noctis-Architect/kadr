@@ -10,8 +10,12 @@ export const FITS = ['contain', 'cover', 'fill'];
 export const CLIP_DEFAULTS = {
   in: 0, speed: 1, x: 0, y: 0, scale: 1, opacity: 1, volume: 1, fadeIn: 0, fadeOut: 0, fit: 'contain',
   brightness: 1, contrast: 1, saturation: 1,
-  rotation: 0, flipH: false, flipV: false, cropT: 0, cropR: 0, cropB: 0, cropL: 0, xfade: 0,
+  rotation: 0, flipH: false, flipV: false, cropT: 0, cropR: 0, cropB: 0, cropL: 0, xfade: 0, xfadeType: 'dissolve',
 };
+
+// How a clip with xfade > 0 takes over from the previous clip: a dissolve, or
+// both pictures pushed out of frame together (the new one comes from that side).
+export const XFADE_TYPES = ['dissolve', 'pushLeft', 'pushRight', 'pushUp', 'pushDown'];
 
 // Properties that can carry keyframes: clip.keys = { x: [[t, value, ease?], ...] }
 // t is seconds from the clip start; ease shapes the move from this key to the next.
@@ -20,7 +24,7 @@ export const EASES = ['ease', 'linear', 'in', 'out', 'hold'];
 
 const CLIP_KEY_ORDER = [
   'id', 'track', 'type', 'src', 'start', 'duration', 'in', 'speed',
-  'fit', 'x', 'y', 'scale', 'rotation', 'flipH', 'flipV', 'opacity', 'volume', 'fadeIn', 'fadeOut', 'xfade',
+  'fit', 'x', 'y', 'scale', 'rotation', 'flipH', 'flipV', 'opacity', 'volume', 'fadeIn', 'fadeOut', 'xfade', 'xfadeType',
   'cropT', 'cropR', 'cropB', 'cropL', 'brightness', 'contrast', 'saturation', 'keys', 'props', 'label', 'disabled',
 ];
 const TIME_KEYS = ['start', 'duration', 'in', 'fadeIn', 'fadeOut', 'xfade'];
@@ -250,6 +254,7 @@ export function validateProject(raw) {
     if (num(c.cropL) && num(c.cropR) && c.cropL + c.cropR >= 100) errors.push(`${at}: cropL + cropR must stay below 100`);
     if (num(c.cropT) && num(c.cropB) && c.cropT + c.cropB >= 100) errors.push(`${at}: cropT + cropB must stay below 100`);
     if (c.xfade != null && !(num(c.xfade) && c.xfade >= 0)) errors.push(`${at}: "xfade" must be >= 0 (seconds of cross dissolve from the previous clip)`);
+    if (c.xfadeType != null && !XFADE_TYPES.includes(c.xfadeType)) errors.push(`${at}: "xfadeType" must be one of ${XFADE_TYPES.join(', ')}`);
     if (c.keys != null) {
       if (typeof c.keys !== 'object' || Array.isArray(c.keys)) errors.push(`${at}: "keys" must be an object like {"x": [[0, 0], [1, 200]]}`);
       else {
@@ -341,7 +346,7 @@ export function fadeAt(c, t, tr, audio = false) {
   if (c.fadeIn > 0 && u < c.fadeIn) a = Math.max(0, u / c.fadeIn);
   const rem = c.duration - u;
   if (c.fadeOut > 0 && rem < c.fadeOut) a = Math.min(a, Math.max(0, rem / c.fadeOut));
-  if (tr?.xin > 0) a *= clamp((u + tr.xin / 2) / tr.xin, 0, 1);
+  if (tr?.xin > 0 && (audio || !isPush(tr.tin))) a *= clamp((u + tr.xin / 2) / tr.xin, 0, 1);
   if (audio && tr?.xout > 0) a *= clamp((rem + tr.xout / 2) / tr.xout, 0, 1);
   return a;
 }
@@ -368,11 +373,62 @@ export function transitions(p) {
       const b = list[i];
       if (!(b.xfade > 0) || Math.abs(a.start + a.duration - b.start) > f) continue;
       const d = Math.min(b.xfade, a.duration, b.duration);
-      out.set(b.id, { ...(out.get(b.id) || { xout: 0 }), xin: d });
-      out.set(a.id, { ...(out.get(a.id) || { xin: 0 }), xout: d });
+      const type = XFADE_TYPES.includes(b.xfadeType) ? b.xfadeType : 'dissolve';
+      out.set(b.id, { ...(out.get(b.id) || { xout: 0 }), xin: d, tin: type });
+      out.set(a.id, { ...(out.get(a.id) || { xin: 0 }), xout: d, tout: type });
     }
   }
   return out;
+}
+
+export const isPush = (type) => typeof type === 'string' && type.startsWith('push');
+const PUSH_DIR = { pushLeft: [1, 0], pushRight: [-1, 0], pushUp: [0, 1], pushDown: [0, -1] };
+const easeInOut = (p) => (p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2);
+
+/**
+ * Extra offset in px of a clip that takes part in a push transition at time t.
+ * The incoming clip slides in from the side; the outgoing one slides out the other way.
+ */
+export function transitionOffset(c, t, tr, W, H) {
+  let dx = 0;
+  let dy = 0;
+  if (tr?.xin > 0 && isPush(tr.tin)) {
+    const p = easeInOut(clamp((t - c.start + tr.xin / 2) / tr.xin, 0, 1));
+    const [ux, uy] = PUSH_DIR[tr.tin];
+    dx += ux * W * (1 - p);
+    dy += uy * H * (1 - p);
+  }
+  if (tr?.xout > 0 && isPush(tr.tout)) {
+    const p = easeInOut(clamp((t - (c.start + c.duration) + tr.xout / 2) / tr.xout, 0, 1));
+    const [ux, uy] = PUSH_DIR[tr.tout];
+    dx -= ux * W * p;
+    dy -= uy * H * p;
+  }
+  return { dx, dy };
+}
+
+/**
+ * The same offset as an ffmpeg expression of the output clock `t`; T0 is the
+ * output time of the clip's start. Returns { x, y } strings ('0' when unused).
+ */
+export function transitionOffsetExpr(c, tr, W, H, T0) {
+  const f = (n) => Number(n).toFixed(4);
+  const eio = (p) => `if(lt(${p},0.5),4*pow(${p},3),1-pow(2-2*${p},3)/2)`;
+  const xs = [];
+  const ys = [];
+  if (tr?.xin > 0 && isPush(tr.tin)) {
+    const p = `clip((t-${f(T0)}+${f(tr.xin / 2)})/${f(tr.xin)},0,1)`;
+    const [ux, uy] = PUSH_DIR[tr.tin];
+    if (ux) xs.push(`${ux * W}*(1-${eio(p)})`);
+    if (uy) ys.push(`${uy * H}*(1-${eio(p)})`);
+  }
+  if (tr?.xout > 0 && isPush(tr.tout)) {
+    const p = `clip((t-${f(T0 + c.duration)}+${f(tr.xout / 2)})/${f(tr.xout)},0,1)`;
+    const [ux, uy] = PUSH_DIR[tr.tout];
+    if (ux) xs.push(`${-ux * W}*${eio(p)}`);
+    if (uy) ys.push(`${-uy * H}*${eio(p)}`);
+  }
+  return { x: xs.length ? xs.join('+') : '0', y: ys.length ? ys.join('+') : '0' };
 }
 
 /** Timeline span where a clip is on screen, including dissolve handles. */

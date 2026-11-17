@@ -109,7 +109,8 @@ All times are **seconds** (floats, rounded to ms on save). Positions are **pixel
 | `opacity` | `1` | 0..1 |
 | `volume` | `1` | 0..4 (video and audio clips; preview caps at 1) |
 | `fadeIn`, `fadeOut` | `0` | seconds; fades opacity for visuals and volume for sound |
-| `xfade` | `0` | seconds of **cross dissolve** from the clip that ends exactly where this one starts on the same track |
+| `xfade` | `0` | seconds of **transition** from the clip that ends exactly where this one starts on the same track |
+| `xfadeType` | `"dissolve"` | how that transition looks: `dissolve`, or `pushLeft` / `pushRight` / `pushUp` / `pushDown` (both pictures slide; the new one comes from that side) |
 | `keys` | | keyframes, see below |
 | `brightness`, `contrast`, `saturation` | `1` | color, 0..4 (1 = unchanged; same math as CSS `brightness()` / `contrast()` / `saturate()`) |
 | `props` | `{}` | html clips only: data passed to the composition |
@@ -131,6 +132,9 @@ Rules:
   and set `b.xfade` (e.g. `0.5`). It is centred on the cut: both clips play `xfade/2` past
   it (holding their first/last frame if the media runs out). Sound crossfades too.
   A "dip to black" is just `fadeOut` on the first clip and `fadeIn` on the second.
+  Graphic transitions are built-in comps on a track above, centred on the cut
+  (`start = cut - duration/2`): `@kadr/flash.html` (dip to white), `@kadr/wipe.html`,
+  `@kadr/iris.html`, `@kadr/stripes.html`. The editor's transition picker writes exactly these.
 
 ### Keyframes
 `x`, `y`, `scale`, `rotation`, `opacity` and `volume` can be animated:

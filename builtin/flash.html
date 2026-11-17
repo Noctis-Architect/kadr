@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="kadr:category" content="Transitions">
+<meta name="kadr:duration" content="0.6">
+<meta name="kadr:description" content="Transition: a quick flash that fills the frame at the midpoint (dip to white by default). Put it on the top track centered on a cut.">
+<meta name="kadr:props" content='{"color":"#ffffff","peak":1}'>
+<meta name="kadr:fields" content='{"peak":{"type":"number","min":0.2,"max":1,"step":0.05,"label":"Strength"}}'>
+<title>Flash</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  #f { position: absolute; inset: 0; background: var(--color, #fff); opacity: 0; }
+</style>
+</head>
+<body>
+<div id="f"></div>
+<script>
+  const f = document.getElementById('f');
+  const peak = Math.max(0, Math.min(1, Number(kadr.prop('peak', 1))));
+  kadr.onFrame(() => {
+    // rises fast, holds briefly at the cut, fades out a little slower
+    const p = kadr.progress;
+    const a = p < 0.45 ? kadr.ease.inQuad(p / 0.45) : p < 0.55 ? 1 : 1 - kadr.ease.outQuad((p - 0.55) / 0.45);
+    f.style.opacity = (a * peak).toFixed(4);
+  });
+</script>
+</body>
+</html>

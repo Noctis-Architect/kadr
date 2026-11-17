@@ -13,7 +13,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { normalizeProject, validateProject, projectDuration, placement, fadeAt, transitions, clipWindow, valueAt, isAnimated, maxScale, resolveAt } from '../shared/model.js';
+import { normalizeProject, validateProject, projectDuration, placement, fadeAt, transitions, clipWindow, valueAt, isAnimated, maxScale, resolveAt, transitionOffset, transitionOffsetExpr } from '../shared/model.js';
 import { Browser } from './chrome.js';
 import { resolveSrc, compUrl, BUILTIN_DIR } from './project.js';
 import { run } from './media.js';
@@ -321,13 +321,23 @@ export async function renderProject(o) {
     const file = c.type === 'html' ? compOut.get(x) : resolveSrc(root, c.src);
     let headPad = 0; // timeline seconds before the media's first frame (dissolve handle)
     let tailPad = 0; // timeline seconds after its last frame
+    let holdLast = false; // the window is past the media's end: show its last frame
     if (c.type === 'video' || c.type === 'audio') {
       const srcStart = c.in + cut * sp;
       headPad = srcStart < 0 ? -srcStart / sp : 0;
-      const ss = Math.max(0, srcStart);
-      const want = Math.max(1 / fps, (len - headPad) * sp);
-      const avail = info.duration ? Math.max(0, info.duration - ss) : want;
-      tailPad = want > avail + 1e-3 ? (want - avail) / sp : 0;
+      let ss = Math.max(0, srcStart);
+      let want = Math.max(1 / fps, (len - headPad) * sp);
+      if (c.type === 'video' && info.duration && ss > info.duration - 1 / fps) {
+        // The whole window is past the media's end (a dissolve or push tail):
+        // read the last moments, keep only the final frame and hold it.
+        ss = Math.max(0, info.duration - 0.3);
+        want = Math.min(0.3, info.duration);
+        holdLast = true;
+        tailPad = Math.max(0, len - headPad - 1 / fps);
+      } else {
+        const avail = info.duration ? Math.max(0, info.duration - ss) : want;
+        tailPad = want > avail + 1e-3 ? (want - avail) / sp : 0;
+      }
       inputs.push(['-ss', f4(ss), '-t', f4(want), '-i', file]);
     } else if (c.type === 'image' || (c.type === 'html' && still)) inputs.push(['-loop', '1', '-framerate', String(fps), '-t', f4(len), '-i', file]);
     else inputs.push(['-i', file]);
@@ -343,6 +353,7 @@ export async function renderProject(o) {
       const U = sub('t', T0);
       const ch = [];
       if (c.type === 'video') {
+        if (holdLast) ch.push('reverse', 'trim=end_frame=1');
         ch.push(sp !== 1 ? `setpts=(PTS-STARTPTS)/${sp.toFixed(6)}` : 'setpts=PTS-STARTPTS', `fps=${fps}`);
         if (headPad > 1e-4 || tailPad > 1e-4) ch.push(`tpad=start_mode=clone:start_duration=${f4(headPad)}:stop_mode=clone:stop_duration=${f4(tailPad + 2 / fps)}`);
       } else ch.push('setpts=PTS-STARTPTS');
@@ -401,8 +412,17 @@ export async function renderProject(o) {
       }
       ch.push('format=yuva420p');
       vf.push(`[${k}:v]${ch.join(',')}[v${k}]`);
-      const px = isAnimated(c, 'x') && !still ? keyExpr(c, 'x', U) : f4(rc.x || 0);
-      const py = isAnimated(c, 'y') && !still ? keyExpr(c, 'y', U) : f4(rc.y || 0);
+      let px = isAnimated(c, 'x') && !still ? keyExpr(c, 'x', U) : f4(rc.x || 0);
+      let py = isAnimated(c, 'y') && !still ? keyExpr(c, 'y', U) : f4(rc.y || 0);
+      // push transitions slide the clip in / out: the same curve as the preview
+      if (still) {
+        const o = transitionOffset(c, from, tr, W, H);
+        if (o.dx || o.dy) { px = `(${px})+${f4(o.dx)}`; py = `(${py})+${f4(o.dy)}`; }
+      } else {
+        const o = transitionOffsetExpr(c, tr, W, H, T0);
+        if (o.x !== '0') px = `(${px})+${o.x}`;
+        if (o.y !== '0') py = `(${py})+${o.y}`;
+      }
       vf.push(`[${vlast}][v${k}]overlay=x='(main_w-overlay_w)/2+${px}':y='(main_h-overlay_h)/2+${py}':eof_action=pass:enable='between(t,${f4(off)},${f4(off + len)})'[o${k}]`);
       vlast = `o${k}`;
     }

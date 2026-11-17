@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="kadr:category" content="Transitions">
+<meta name="kadr:duration" content="1">
+<meta name="kadr:description" content="Transition: a circle closes to a solid color at the cut, then opens on the next shot. Put it on the top track centered on a cut.">
+<meta name="kadr:props" content='{"color":"#0b0b0e","x":50,"y":50}'>
+<meta name="kadr:fields" content='{"x":{"type":"number","min":0,"max":100,"step":1,"unit":"%","label":"Center X"},"y":{"type":"number","min":0,"max":100,"step":1,"unit":"%","label":"Center Y"}}'>
+<title>Iris</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  #m { position: absolute; inset: 0; }
+</style>
+</head>
+<body>
+<div id="m"></div>
+<script>
+  const m = document.getElementById('m');
+  const color = kadr.prop('color', '#0b0b0e');
+  const cx = Number(kadr.prop('x', 50));
+  const cy = Number(kadr.prop('y', 50));
+  kadr.onFrame(() => {
+    const W = kadr.width;
+    const H = kadr.height;
+    // radius that reaches the farthest corner from the center
+    const px = (cx / 100) * W;
+    const py = (cy / 100) * H;
+    const R = Math.hypot(Math.max(px, W - px), Math.max(py, H - py)) + 2;
+    const p = kadr.progress;
+    const r = p < 0.5 ? R * (1 - kadr.ease.inOutCubic(p / 0.5)) : R * kadr.ease.inOutCubic((p - 0.5) / 0.5);
+    m.style.background = `radial-gradient(circle at ${px}px ${py}px, transparent ${r.toFixed(1)}px, ${color} ${(r + 1).toFixed(1)}px)`;
+  });
+</script>
+</body>
+</html>

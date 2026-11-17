@@ -732,13 +732,26 @@ function build() {
   const undoBtn = h('button.btn.ghost.icon', { title: 'Undo  Ctrl+Z', on: { click: undo } }, svg('<path d="M6 4 3 7l3 3M3.5 7H10a3 3 0 0 1 0 6H8"/>'));
   const redoBtn = h('button.btn.ghost.icon', { title: 'Redo  Ctrl+Shift+Z', on: { click: redo } }, svg('<path d="m10 4 3 3-3 3m2.5-3H6a3 3 0 0 0 0 6h2"/>'));
   const codeBtn = h('button.btn.ghost.toggle', { title: 'Show the HTML next to the frame', on: { click: toggleCode } }, svg(ICON.code), 'Code');
+  const maxBtn = h('button.btn.ghost.icon', {}, svg('<path d="M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3"/>'));
   const top = h('header.ce-top', {},
     h('span.badge.k-html', {}, 'comp'),
     h('div.ce-title', {}, name, sub),
     h('div.grow'),
-    codeBtn, undoBtn, redoBtn,
-    h('button.btn', { title: 'Back to the timeline  Esc', on: { click: close } }, 'Done'));
-  const root = h('div.ce', {}, top, h('div.ce-main', {}, codePane, stage), side, gantt);
+    codeBtn, undoBtn, redoBtn, maxBtn,
+    h('button.btn.primary', { title: 'Back to the timeline  Esc', on: { click: close } }, 'Done'));
+  const win = h('div.ce', {}, top, h('div.ce-main', {}, codePane, stage), side, gantt);
+  // A window over the editor (the timeline stays in view), not a separate page.
+  const root = h('div.ce-back', { on: { pointerdown: (e) => { if (e.target === root) close(); } } }, win);
+  let max = false;
+  try { max = localStorage.getItem('kadr.ceMax') === '1'; } catch { /* private mode */ }
+  const setMax = (v) => {
+    max = v;
+    root.classList.toggle('max', v);
+    maxBtn.title = v ? 'Smaller window' : 'Fill the screen';
+    try { localStorage.setItem('kadr.ceMax', v ? '1' : '0'); } catch { /* ignore */ }
+  };
+  maxBtn.onclick = () => { setMax(!max); requestAnimationFrame(() => window.dispatchEvent(new Event('resize'))); };
+  setMax(max);
   document.body.append(root);
   ui = { ph, root, canvas, stage, hoverBox, selBox, side, play: playBtn, time, ruler, rows: rowsEl, gantt, ganttCount, code, codeState, name, sub, undo: undoBtn, redo: redoBtn, codeBtn };
   new ResizeObserver(fit).observe(stage);

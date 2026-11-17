@@ -7,6 +7,7 @@ import {
   prevAdjacent, addDissolve, gapAt, closeGap,
 } from './ops.js';
 import { openMenu } from './menu.js';
+import { openTransitionPopup } from './transitions.js';
 
 const HEAD = 132;
 const RULER = 26;
@@ -685,7 +686,7 @@ rowsEl.addEventListener('contextmenu', (e) => {
     !multi && c.type === 'video' ? { label: 'Freeze frame at playhead', disabled: !under, on: () => freezeFrame(c) } : null,
     !multi && (c.type === 'video' || c.type === 'audio') ? { label: 'Reverse', on: () => reverseClip(c) } : null,
     !multi && c.type === 'video' && S.media.get(c.src)?.hasAudio && c.volume > 0 ? { label: 'Detach audio', on: () => detachAudio(c) } : null,
-    !multi && prevAdjacent(c) ? { label: c.xfade > 0 ? 'Remove cross dissolve' : 'Cross dissolve from previous', on: () => (c.xfade > 0 ? commit(() => { c.xfade = 0; }) : addDissolve(c)) } : null,
+    !multi && prevAdjacent(c) ? { label: 'Transition…', on: () => openTransitionPopup(c, e.clientX, e.clientY) } : null,
     '-',
     { label: c.disabled ? 'Enable' : 'Disable', kbd: 'Shift E', on: () => commit(() => { const v = !c.disabled; for (const id of S.sel) clipById(id).disabled = v; }) },
     !c.src.startsWith('@kadr/') && !multi ? { label: 'Show file', on: () => api('/api/reveal', { path: c.src, select: true }) } : null,
