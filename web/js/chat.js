@@ -1,11 +1,13 @@
-// Chat panel: talks to Claude Code running headless in the project folder
-// (server side: src/agent.js). The agent edits the same files the editor shows,
+// Chat panel: talks to the agent picked in AI settings (Claude Code, another
+// agent CLI, or kadr's own agent over a model API), running in the project
+// folder (server side: src/agent.js). The agent edits the same files the editor shows,
 // so the preview updates while it works.
 import { tc, clipEnd } from '/shared/model.js';
 import { ART } from './art.js';
 import { S, on, emit, duration, toast } from './state.js';
 import { $, h, svg, api } from './util.js';
 import { clipById } from './ops.js';
+import { openAiSettings } from './aisettings.js';
 
 const root = $('#chat');
 let info = { agents: {}, busy: false, messages: [] };
@@ -31,6 +33,7 @@ const I = {
   stop: '<rect x="4.5" y="4.5" width="7" height="7" rx="1.5" fill="currentColor" stroke="none"/>',
   plus: '<path d="M8 3v10M3 8h10"/>',
   lock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7"/>',
+  gear: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/>',
   unlock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 4.8-1"/>',
 };
 
@@ -72,7 +75,9 @@ const ctxBtn = h('button.ctx', { title: 'Editor context sent with your message (
 const modelSel = h('select', { title: 'Model' }, ...[['', 'Default model'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']].map(([v, t]) => h('option', { value: v }, t)));
 const accessBtn = h('button.btn.ghost.icon', { style: { width: '24px', height: '24px' } });
 const sendBtn = h('button.send', { title: 'Send' });
-const who = h('div.who', {}, h('i'), 'Claude Code');
+const whoName = h('span');
+const who = h('div.who', {}, h('i'), whoName);
+const gearBtn = h('button.btn.ghost.icon', { title: 'AI settings: choose the agent, add API keys for images, voice and transcripts', style: { width: '26px', height: '26px' }, on: { click: () => openAiSettings(loadChat) } }, svg(I.gear));
 const nodes = new Map();
 
 function paintControls() {
@@ -92,6 +97,8 @@ function paintControls() {
     ? 'Full access: the agent may run any command without asking. Click to limit it to project files + kadr/ffmpeg.'
     : 'Limited: the agent can edit project files and run kadr / ffmpeg only. Click for full access.';
   modelSel.value = model;
+  modelSel.hidden = info.agent && info.agent !== 'claude';
+  whoName.textContent = info.agentName ? `${info.agentName}${info.apiModel ? ` · ${info.apiModel}` : ''}` : 'Chat';
 }
 
 function msgNode(m) {
@@ -144,16 +151,23 @@ function lightbox(src) {
 function renderAll() {
   const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
   nodes.clear();
-  if (!info.agents?.claude) {
-    log.replaceChildren(h('div.chat-empty', {}, h('h5', {}, 'Claude Code is not installed'),
-      h('p', { html: 'The chat runs the <code>claude</code> CLI with your own login, no API key needed. Install Claude Code, sign in once in a terminal, then reload this page.' })));
+  if (!info.ready) {
+    const isApi = info.agent === 'api';
+    log.replaceChildren(h('div.chat-empty', {},
+      h('h5', {}, isApi ? 'Set up the model API' : `${info.agentName || 'The agent'} is not installed`),
+      h('p', { html: isApi
+        ? 'The chat is set to use a model API. Choose the service, the model and paste your API key in AI settings.'
+        : info.agent === 'claude'
+          ? 'The chat runs the <code>claude</code> CLI with your own login, no API key needed. Install Claude Code and sign in once in a terminal, or pick another agent or an API key in AI settings.'
+          : 'Install it and sign in once in a terminal, or pick another agent in AI settings.' }),
+      h('button.btn.primary', { on: { click: () => openAiSettings(loadChat) } }, 'Open AI settings')));
     return;
   }
   if (!msgs.length) {
     log.replaceChildren(h('div.chat-empty', {},
       h('div.empty-art', { html: ART.chat() }),
       h('h5', {}, 'Edit by describing it'),
-      h('p', {}, 'Claude Code works on this project\'s files with your own account. You see every change live, and each turn can be undone.'),
+      h('p', {}, `${info.agentName || 'The agent'} works on this project's files. You see every change live, and each turn can be undone.`),
       h('div.chips', {}, ...SUGGEST.map((s) => h('button.chip', { dir: 'rtl', on: { click: () => { ta.value = s; autosize(); ta.focus(); paintControls(); } } }, s)))));
     return;
   }
@@ -215,7 +229,7 @@ accessBtn.onclick = () => {
 };
 
 root.replaceChildren(
-  h('div.chat-head', {}, who, h('div.grow'),
+  h('div.chat-head', {}, who, h('div.grow'), gearBtn,
     h('button.btn.ghost.sm', { title: 'Start a new conversation (the project keeps all changes)', on: { click: () => { if (info.busy) return; if (!msgs.length || confirm('Start a new conversation?')) api('/api/agent/reset', {}).catch((e) => toast(e.message, true)); } } }, 'New chat')),
   log,
   h('div.composer', {}, h('div.box', {}, ta, h('div.row', {}, ctxBtn, h('div.grow'), modelSel, accessBtn, sendBtn))),
@@ -257,3 +271,4 @@ on('agent', (e) => {
 });
 on('time', () => { if (!S.playing) paintControls(); });
 on('select', paintControls);
+on('settings', () => { if (!info.busy) loadChat(); });

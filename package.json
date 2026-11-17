@@ -5,7 +5,7 @@
   "type": "module",
   "bin": { "kadr": "bin/kadr.js" },
   "engines": { "node": ">=22" },
-  "files": ["bin", "src", "shared", "runtime", "builtin", "template", "web"],
+  "files": ["bin", "src", "shared", "runtime", "builtin", "template", "skills", "web"],
   "scripts": { "start": "node bin/kadr.js serve" },
   "license": "MIT"
 }

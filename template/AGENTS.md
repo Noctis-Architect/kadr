@@ -37,6 +37,25 @@ range, `part` is a part of a composition the user picked on the timeline:
 its `src` file and `key`, an element's `data-part` name (`p:Title`), `#id` or
 `.class:tag`). "This part" means that element in that file. Read it with `kadr state`.
 
+## Skills
+
+Step-by-step guides for common jobs live in `.claude/skills/<name>/SKILL.md`.
+Read the matching one before you start that kind of edit:
+`youtube-video`, `shorts-reels` (Shorts, Reels, TikTok), `instagram-post`,
+`captions`, `repurpose-clips` (long video to shorts), `thumbnail`,
+`voiceover-explainer` (video from a script, no camera).
+
+## Generating media
+
+If the user set up services in the editor (Chat → settings), you can make new media:
+- `kadr gen image "<prompt>" [--size 1536x1024]`: a PNG in `media/gen/`
+- `kadr gen speech "<text>" [--voice v]`: a voice-over in `media/gen/`
+- `kadr gen transcribe <file> [--language fa]`: JSON with `words: [{w, s, e}]` (seconds in the file)
+Each prints the new file's path. `kadr settings` shows what is set up. If a
+service is missing, tell the user to add it in Chat → settings; never look for
+or ask for API keys yourself. Generation can cost the user money: generate what
+the edit needs, not batches of alternatives, unless asked.
+
 ## project.json
 
 ```json
@@ -174,6 +193,10 @@ Declare the props and their defaults so the editor builds controls for them
 (color pickers for colors, number fields with scrubbing, and so on):
 `<meta name="kadr:props" content='{"title":"Hello","accent":"#e8ff59","size":120}'>`,
 plus a one-line `<meta name="kadr:description" content="...">`.
+Optionally describe props further in `kadr:fields` (all keys optional):
+`<meta name="kadr:fields" content='{"anim":{"options":["fade","rise"]},"size":{"type":"number","min":10,"max":300,"step":1,"unit":"px"},"words":{"type":"json","label":"Word timing","description":"..."}}'>`.
+`type` is one of text, longtext, number, color, boolean, select, image, json. A prop
+listed only in `kadr:fields` is optional (no default) but still gets a control.
 
 ### Props
 `"props": {"title": "Hi", "accent": "#ff5a1f"}` on the clip. Inside the comp:
@@ -224,8 +247,9 @@ Write comps so that the GUI can find each part:
 - Don't use `<video>`/`<audio>` inside comps. Put footage on the timeline as clips.
 - A comp shows time `in + (t - start)`. If the clip runs longer than the comp's
   duration, the last state holds.
-- After editing a comp, run `kadr comp comps/x.html`. It renders frames and
-  prints JS console errors. Fix all errors.
+- After editing a comp, run `kadr lint comps/x.html` (checks the rules above
+  without a browser; every finding has a code and a fix) and `kadr comp comps/x.html`
+  (renders frames and prints JS console errors). Fix all errors and warnings.
 
 ### Built-in templates (`@kadr/...`)
 Ready-made, polished compositions you can use as `src` without copying them.
@@ -252,6 +276,7 @@ the file into `comps/` and edit it there.
 ```
 kadr info                         project summary (add --json for machine-readable)
 kadr validate                     errors + warnings; exit code 1 on errors
+kadr lint [file.html...] [--json] check comps for render-breaking code (default: all of comps/)
 kadr state                        editor selection / playhead / in-out
 kadr add <src> [--track V2] [--at 3] [--in 0] [--duration 4] [--props '{"title":"x"}']
 kadr frame <t...> [-o out.png]    composited still(s) -> .kadr/frames/
@@ -261,6 +286,8 @@ kadr probe <file>                 media info (JSON)
 kadr scenes <video> [--threshold 0.3]       scene cuts (JSON)
 kadr silence <file> [--noise -35] [--min 0.4]   silent ranges (JSON), handy for jump cuts
 kadr templates                    built-in compositions and their props
+kadr gen image "<prompt>" | gen speech "<text>" | gen transcribe <file>
+kadr settings                     which generation services are set up
 kadr render [-o renders/x.mp4] [--from t] [--to t] [--crf 18] [--codec h264|h265|prores|av1|vp9]
             [--size 3840x2160] [--loudness -14] [--motion-blur 8]
 ```
@@ -283,4 +310,4 @@ kadr render [-o renders/x.mp4] [--from t] [--to t] [--crf 18] [--codec h264|h265
 - **Delivery**: `kadr render --loudness -14` for web/social (EBU R128), `--codec prores` for a master,
   `--motion-blur 8` makes fast motion graphics look filmed rather than computer-made.
 
-Always finish with `kadr validate` and at least one `kadr frame`/`kadr sheet` check.
+Always finish with `kadr validate`, `kadr lint` when you touched a comp, and at least one `kadr frame`/`kadr sheet` check.

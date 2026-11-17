@@ -8,6 +8,16 @@ shows, and the preview updates as they save.
   with your own login (no API key). You see every step, the frames it renders to
   check its work, and each turn can be undone with one click (checkpoints of
   project.json + comps/). It knows your playhead and selection.
+- **Pick your agent**: Claude Code, Codex, Gemini CLI or OpenCode with their
+  own logins, or kadr's built-in agent with your API key (Anthropic, OpenAI,
+  OpenRouter, Gemini, Ollama, any OpenAI-compatible server). Chat → settings.
+- **Generated media**: with your keys, agents can make images (`kadr gen image`),
+  voice-overs (`kadr gen speech`, also free local Piper / eSpeak) and word-timed
+  transcripts for captions (`kadr gen transcribe`). Keys are stored in
+  `~/.config/kadr/settings.json`, never in a project.
+- **Editing skills**: every project gets guides for YouTube, Shorts/Reels/TikTok,
+  Instagram, captions, long-to-short clips, thumbnails and voice-over explainers
+  (`.claude/skills/`, `kadr skills --update` to refresh).
 - **Manual editing**: timeline with tracks, move / trim / split / ripple delete,
   snapping, razor, markers, in/out, fades, opacity, position/scale (drag right
   on the preview), speed (0.1–16×, pitch kept), color (brightness / contrast /
@@ -27,7 +37,8 @@ shows, and the preview updates as they save.
   GSAP are deterministic: the preview and the export match frame for frame.
 - **Built for agents**: `project.json` (one clip per line), `AGENTS.md` in every
   project, and a CLI that lets an agent *look* at its work
-  (`kadr frame`, `kadr sheet`, `kadr comp`) and analyse footage
+  (`kadr frame`, `kadr sheet`, `kadr comp`), check compositions for code that
+  would make the export differ from the preview (`kadr lint`), and analyse footage
   (`kadr scenes`, `kadr silence`, `kadr probe`).
 - **Light**: Node with zero npm dependencies, about 60 MB RAM idle. Headless
   Chromium starts only while rendering compositions, and ffmpeg does the rest.
@@ -71,9 +82,14 @@ project folder                       kadr serve (Node, 127.0.0.1 only)
 | path | |
 |---|---|
 | `shared/model.js` | project schema, validation, placement math, used by server, CLI and UI |
+| `shared/lint.js` | composition checks behind `kadr lint` (stable codes, one fix each) |
 | `runtime/kadr.js` | the composition runtime (clock, props, easing helpers) |
 | `src/server.js` | HTTP + SSE + watcher (per-directory, survives atomic saves) |
-| `src/agent.js` | chat bridge: `claude -p --output-format stream-json`, checkpoints |
+| `src/agent.js` | chat bridge: Claude Code (stream-json), other agent CLIs, checkpoints |
+| `src/apiagent.js` | built-in agent loop over the Anthropic or an OpenAI-compatible API |
+| `src/settings.js` | user settings and keys (outside projects) |
+| `src/gen.js` | `kadr gen`: images, speech, transcripts |
+| `skills/` | editing skills copied into each project's `.claude/skills/` |
 | `builtin/` | templates served as `@kadr/...` to every project |
 | `src/render.js` | export pipeline |
 | `src/chrome.js` | ~150-line Chrome DevTools Protocol client |

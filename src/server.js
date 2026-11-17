@@ -8,7 +8,8 @@ import { APP_DIR, BUILTIN_DIR, safeJoin, readProjectText, resolveSrc } from './p
 import { Media } from './media.js';
 import { renderProject } from './render.js';
 import { findChrome } from './chrome.js';
-import { AgentBridge } from './agent.js';
+import { AgentBridge, which } from './agent.js';
+import { loadSettings, saveSettings, publicSettings, mergeSettings } from './settings.js';
 import { probe } from './media.js';
 import { findRoot } from './project.js';
 import { initProject } from './init.js';
@@ -350,6 +351,14 @@ export async function startServer({ root: startRoot, port = 4310, host = '127.0.
       broadcast({ type: 'log', src: body.src, kind: body.kind, msg: body.msg });
       res.writeHead(204);
       return res.end();
+    }
+    if (p === '/api/settings' && m === 'GET') return json(res, 200, { ...publicSettings(loadSettings()), agents: agent.info().agents, local: { piper: !!which('piper'), espeak: !!which('espeak-ng') } });
+    if (p === '/api/settings' && m === 'POST') {
+      if (agent.proc) throw Object.assign(new Error('wait for the chat agent to finish first'), { status: 409 });
+      const next = mergeSettings(loadSettings(), JSON.parse(await readBody(req, 2e4)));
+      await saveSettings(next);
+      broadcast({ type: 'settings' });
+      return json(res, 200, { ...publicSettings(next), agents: agent.info().agents });
     }
     if (p === '/api/agent' && m === 'GET') return json(res, 200, agent.info());
     if (p === '/api/agent' && m === 'POST') {

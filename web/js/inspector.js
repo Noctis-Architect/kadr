@@ -275,11 +275,31 @@ function parseVal(s) {
 }
 const showVal = (v) => (typeof v === 'object' ? JSON.stringify(v) : String(v ?? ''));
 
-function propField(c, k, def) {
+/** Control for one prop. `spec` comes from the comp's kadr:fields meta (optional). */
+function propField(c, k, def, spec) {
+  const el = typedField(c, k, def, spec || {});
+  if (spec?.description) el.title = spec.description;
+  return el;
+}
+
+function typedField(c, k, def, spec) {
   const get = () => c.props?.[k] ?? def;
   const set = (v) => { c.props = { ...(c.props || {}), [k]: v }; };
-  const label = nice(k);
+  const label = spec.label || nice(k);
   const sample = c.props?.[k] ?? def;
+  const type = spec.type || (Array.isArray(spec.options) ? 'select' : null);
+  if (type === 'select' && Array.isArray(spec.options)) return selectField(label, spec.options.map(String), get, (v) => set(typeof def === 'number' ? Number(v) : v));
+  if (type === 'boolean') return segField(label, [[true, 'on'], [false, 'off']], get, set);
+  if (type === 'number') {
+    return numField(label, () => Number(get() ?? 0), set, {
+      step: spec.step ?? STEPS[k] ?? 0.05, unit: spec.unit || '', digits: 3,
+      min: Number.isFinite(spec.min) ? spec.min : -Infinity, max: Number.isFinite(spec.max) ? spec.max : Infinity,
+    });
+  }
+  if (type === 'color') return colorField(label, get, set);
+  if (type === 'image') return imageField(c, label, get, set);
+  if (type === 'json') return textField(label, () => (get() == null ? '' : JSON.stringify(get())), (v) => { try { set(v.trim() ? JSON.parse(v) : undefined); } catch { /* typing */ } }, { area: true });
+  if (type === 'text' || type === 'longtext') return textField(label, () => get() ?? '', set, { area: type === 'longtext' });
   if (ENUMS[k]) return selectField(label, ENUMS[k], get, set);
   if (typeof sample === 'string' && IMG_RE.test(sample.trim())) return imageField(c, label, get, set);
   if (typeof sample === 'boolean') return segField(label, [[true, 'on'], [false, 'off']], get, set);
@@ -315,7 +335,9 @@ function imageField(c, label, get, set) {
 }
 
 function propsSection(c, info) {
-  const schema = info?.props || {};
+  const specs = info?.fields || {};
+  // Props described only in kadr:fields are optional (no default) but still get a control.
+  const schema = { ...Object.fromEntries(Object.keys(specs).map((k) => [k, undefined])), ...(info?.props || {}) };
   const keys = [...new Set([...Object.keys(schema), ...Object.keys(c.props || {})])];
   const known = keys.filter((k) => k in schema);
   const extra = keys.filter((k) => !(k in schema));
@@ -342,7 +364,7 @@ function propsSection(c, info) {
   return sec([info?.title || 'Props', h('span', { style: { display: 'flex', gap: '2px' } },
     customized ? h('button.btn.ghost.sm', { title: 'Back to the template defaults', on: { click: () => commit(() => { const o = {}; for (const [a, b] of Object.entries(c.props || {})) if (!(a in schema)) o[a] = b; c.props = o; }) } }, 'Defaults') : null, add)],
     visual,
-    ...known.map((k) => propField(c, k, schema[k])), ...rows,
+    ...known.map((k) => propField(c, k, schema[k], specs[k])), ...rows,
     !keys.length ? h('div.hint', {}, 'This composition declares no props. Add some, or ask the chat to make it configurable.') : null,
     info?.description ? h('div.hint', { style: { marginTop: '8px' } }, info.description) : null,
     !c.src.startsWith('@kadr/') ? h('div.hint', { style: { marginTop: '8px' } }, 'Edit ', h('code', {}, c.src), ' (or ask the chat). The preview reloads when it is saved.') : null);

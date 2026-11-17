@@ -12,6 +12,11 @@ import { startServer } from '../src/server.js';
 import { renderProject } from '../src/render.js';
 import { Browser } from '../src/chrome.js';
 import { initProject } from '../src/init.js';
+import { lintFile, defaultTargets, builtinTargets } from '../src/lint.js';
+import { genImage, genSpeech, transcribe } from '../src/gen.js';
+import { loadSettings, publicSettings, service } from '../src/settings.js';
+import { installSkills } from '../src/init.js';
+import { AGENTS } from '../shared/providers.js';
 
 const HELP = `kadr — local video editor that coding agents can drive
 
@@ -24,6 +29,9 @@ project
                                   open the editor at http://127.0.0.1:4310
   info                            summary: settings, tracks, every clip
   validate                        check project.json + files; exit 1 on errors
+  lint [file.html...] [--json] [--strict] [--builtin]
+                                  check compositions for things that break renders
+                                  (default: every .html in comps/); exit 1 on errors
   state                           what the user has selected / where the playhead is
   add <src> [--track V1] [--at 0] [--in 0] [--duration d] [--props '{}']
                                   append a clip (duration probed from the file)
@@ -43,6 +51,16 @@ media analysis (JSON)
                                   scene-cut timestamps
   silence <file> [--noise -35] [--min 0.4]
                                   silent ranges (dB threshold, min seconds)
+
+generate media with the services set up in the editor (Chat → settings);
+writes into media/gen/ and prints the path
+  gen image "<prompt>" [--size 1024x1536] [-o file.png]
+  gen speech "<text>" [--voice v] [--style "calm, warm"] [-o file.mp3]
+  gen transcribe <file> [--language fa] [--from t] [--span s] [-o file.json]
+                                  words with timing, ready for @kadr/captions.html
+  settings                        which agent and services are set up (no keys shown)
+  skills [--update]               add the editing skills (YouTube, Shorts/Reels, …) to
+                                  this project, or refresh them
 
 media helpers (write new files into media/, print the path)
   freeze <video> <sourceTime>     still PNG of one frame -> media/freeze/
@@ -66,7 +84,7 @@ function parseArgs(argv) {
     else if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=');
       if (v !== undefined) out[k] = v;
-      else if (argv[i + 1] !== undefined && !argv[i + 1].startsWith('--') && !['open', 'demo', 'no-cache', 'json', 'debug'].includes(k)) out[k] = argv[++i];
+      else if (argv[i + 1] !== undefined && !argv[i + 1].startsWith('--') && !['open', 'demo', 'no-cache', 'json', 'debug', 'strict', 'builtin', 'verbose', 'update'].includes(k)) out[k] = argv[++i];
       else out[k] = true;
     } else out._.push(a);
   }
@@ -210,6 +228,92 @@ const commands = {
       console.log(`ok — ${p.clips.length} clips, ${projectDuration(p).toFixed(3)}s${warnings.length ? `, ${warnings.length} warning(s)` : ''}`);
     }
     process.exitCode = errors.length ? 1 : 0;
+  },
+
+  async lint(args) {
+    let root = null;
+    let files;
+    if (args.builtin) files = await builtinTargets();
+    else if (args._.length) {
+      files = args._.map((f) => path.resolve(f));
+      root = findRoot(path.dirname(files[0]));
+    } else {
+      root = projectRoot(args);
+      let raw = null;
+      try { raw = await readProject(root); } catch { /* lint comps/ anyway */ }
+      files = await defaultTargets(root, raw);
+    }
+    const results = [];
+    for (const f of files) {
+      if (!fs.existsSync(f)) die(`no such file: ${f}`);
+      results.push({ file: path.relative(process.cwd(), f) || f, findings: await lintFile(f, root) });
+    }
+    const all = results.flatMap((r) => r.findings);
+    const errors = all.filter((x) => x.severity === 'error').length;
+    const warnings = all.filter((x) => x.severity === 'warning').length;
+    if (args.json) console.log(JSON.stringify({ errors, warnings, files: results }, null, 2));
+    else {
+      for (const r of results) {
+        for (const x of r.findings) {
+          if (x.severity === 'info' && !args.verbose) continue;
+          console.log(`${r.file}:${x.line || 1}  ${x.severity.padEnd(7)} ${x.code}  ${x.message}\n    fix: ${x.fix}`);
+        }
+      }
+      const infos = all.length - errors - warnings;
+      console.log(`${files.length} composition${files.length === 1 ? '' : 's'}: ${errors} error(s), ${warnings} warning(s)${infos && !args.verbose ? `, ${infos} note(s) (--verbose)` : ''}`);
+    }
+    process.exitCode = errors || (args.strict && warnings) ? 1 : 0;
+  },
+
+  async gen(args) {
+    const [what, ...rest] = args._;
+    const root = findRoot(args.C || process.cwd()) || process.cwd();
+    const text = rest.join(' ').trim();
+    const show = (f) => console.log(path.relative(process.cwd(), f) || f);
+    if (what === 'image') {
+      if (!text) die('usage: kadr gen image "<prompt>" [--size 1024x1536] [-o out.png]');
+      return show(await genImage(root, text, { size: args.size, out: args.o }));
+    }
+    if (what === 'speech' || what === 'voice' || what === 'tts') {
+      const t = text || (args.file ? await fsp.readFile(path.resolve(args.file), 'utf8') : '');
+      if (!t.trim()) die('usage: kadr gen speech "<text>" [--voice v] [-o out.mp3]   (or --file script.txt)');
+      return show(await genSpeech(root, t.trim(), { voice: args.voice, out: args.o, instructions: args.style }));
+    }
+    if (what === 'transcribe' || what === 'stt') {
+      if (!rest[0]) die('usage: kadr gen transcribe <file> [--language fa] [-o out.json]');
+      const { file, result } = await transcribe(root, rest[0], {
+        language: args.language, out: args.o, from: args.from != null ? parseTime(args.from) : 0, span: args.span != null ? parseTime(args.span) : undefined,
+      });
+      show(file);
+      console.log(`${result.words.length} words, ${result.segments.length} segments${result.language ? `, language ${result.language}` : ''}`);
+      return;
+    }
+    die('usage: kadr gen image|speech|transcribe ...   (see kadr help)');
+  },
+
+  async settings() {
+    const s = loadSettings();
+    const pub = publicSettings(s);
+    console.log(`settings file: ${pub.file}`);
+    console.log(`chat agent:    ${AGENTS[s.agent].name}`);
+    const line = (label, k) => {
+      const r = service(s, k);
+      if (!r) return console.log(`${label.padEnd(14)} not set up`);
+      const ready = !r.needsKey || r.key;
+      console.log(`${label.padEnd(14)} ${r.name}${r.model ? ` · ${r.model}` : ''}${r.voice ? ` · voice ${r.voice}` : ''}${ready ? '' : '  (no API key yet)'}`);
+    };
+    line('agent API:', 'llm');
+    line('images:', 'image');
+    line('voice:', 'speech');
+    line('transcripts:', 'transcribe');
+  },
+
+  async skills(args) {
+    const root = projectRoot(args);
+    const { added, updated } = await installSkills(root, { update: !!args.update });
+    for (const n of added) console.log(`added    .claude/skills/${n}`);
+    for (const n of updated) console.log(`updated  .claude/skills/${n}`);
+    if (!added.length && !updated.length) console.log('skills are up to date (use --update to refresh them from this kadr version)');
   },
 
   async state(args) {
@@ -381,6 +485,7 @@ const commands = {
       const info = await probe(path.join(dir, f));
       console.log(`@kadr/${f}  (${info.duration ?? '?'}s)  ${info.description || info.title || ''}`);
       if (info.props) console.log(`    props ${JSON.stringify(info.props)}`);
+      if (info.fields) console.log(`    fields ${JSON.stringify(info.fields)}`);
     }
   },
 

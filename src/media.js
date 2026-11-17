@@ -6,6 +6,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { mediaKind, stripSpec } from '../shared/model.js';
 import { resolveSrc } from './project.js';
+import { readFields } from '../shared/lint.js';
 
 /**
  * Run a process. Resolves with stdout (string, or Buffer with binary:true).
@@ -72,7 +73,7 @@ export async function probe(abs) {
     if (pm) { try { props = JSON.parse(pm[1].replace(/&quot;/g, '"')); } catch { props = null; } }
     const d = txt.match(/<meta\s+name=["']kadr:description["']\s+content=["']([^"']*)["']/i);
     const cat = txt.match(/<meta\s+name=["']kadr:category["']\s+content=["']([^"']*)["']/i);
-    return { kind, duration: m ? parseFloat(m[1]) : null, title: t ? t[1].trim() : null, props, description: d ? d[1] : null, category: cat ? cat[1] : null };
+    return { kind, duration: m ? parseFloat(m[1]) : null, title: t ? t[1].trim() : null, props, fields: readFields(txt), description: d ? d[1] : null, category: cat ? cat[1] : null };
   }
   const json = await run('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', abs]);
   const j = JSON.parse(json);

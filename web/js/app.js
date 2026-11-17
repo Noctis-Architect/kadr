@@ -87,6 +87,8 @@ function connect() {
       loadMedia();
     } else if (m.type === 'agent') {
       emit('agent', m);
+    } else if (m.type === 'settings') {
+      emit('settings', m);
     } else if (m.type === 'export') {
       emit('export', m);
     } else if (m.type === 'log') {

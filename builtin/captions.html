@@ -6,6 +6,7 @@
 <meta name="kadr:duration" content="6">
 <meta name="kadr:description" content="Social-style captions: a few words at a time, the spoken word highlighted. Give exact timing with props.words = [{w, s, e}] (seconds), otherwise words are spread evenly.">
 <meta name="kadr:props" content='{"text":"Captions that follow every word you say","perLine":3,"size":84,"color":"#ffffff","accent":"#e8ff59","ink":"#111111","y":78,"upper":true,"weight":"800"}'>
+<meta name="kadr:fields" content='{"words":{"type":"json","label":"Word timing","description":"Optional: [{\"w\":\"Hello\",\"s\":0,\"e\":0.4}, ...] in seconds from the clip start. Without it the words of text are spread evenly."},"perLine":{"type":"number","min":1,"max":12,"step":1},"y":{"type":"number","min":0,"max":100,"step":1,"unit":"%"}}'>
 <title>Captions</title>
 <style>
   html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
@@ -44,6 +45,8 @@
     if (pi !== shown) {
       shown = pi;
       cap.replaceChildren();
+      // Persian, Arabic, Hebrew: the words of a line run right to left.
+      cap.dir = /[֐-ࣿיִ-﷿ﹰ-﻿]/.test((pages[pi] || []).map((wd) => wd.w).join('')) ? 'rtl' : 'ltr';
       els = (pages[pi] || []).map((wd) => {
         const s = document.createElement('span');
         s.className = 'w';

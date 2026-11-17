@@ -5,6 +5,36 @@ import { APP_DIR, writeProject } from './project.js';
 import { run } from './media.js';
 
 const TEMPLATE = path.join(APP_DIR, 'template');
+const SKILLS = path.join(APP_DIR, 'skills');
+
+/**
+ * Copy kadr's editing skills into <project>/.claude/skills/ (Claude Code finds
+ * them there; AGENTS.md points other agents at the same files). Existing skills
+ * are left alone unless update is set, so a user's own edits survive.
+ */
+export async function installSkills(root, { update = false } = {}) {
+  const added = [];
+  const updated = [];
+  let names = [];
+  try { names = (await fsp.readdir(SKILLS, { withFileTypes: true })).filter((e) => e.isDirectory()).map((e) => e.name).sort(); } catch { return { added, updated }; }
+  const same = async (a, b) => {
+    try {
+      for (const e of await fsp.readdir(a, { withFileTypes: true })) {
+        const x = path.join(a, e.name);
+        const y = path.join(b, e.name);
+        if (e.isDirectory()) { if (!(await same(x, y))) return false; } else if (!(await fsp.readFile(x)).equals(await fsp.readFile(y))) return false;
+      }
+      return true;
+    } catch { return false; }
+  };
+  for (const n of names) {
+    const src = path.join(SKILLS, n);
+    const dest = path.join(root, '.claude', 'skills', n);
+    if (!fs.existsSync(dest)) { await fsp.cp(src, dest, { recursive: true }); added.push(n); }
+    else if (update && !(await same(src, dest))) { await fsp.cp(src, dest, { recursive: true, force: true }); updated.push(n); }
+  }
+  return { added, updated };
+}
 
 async function copyDir(src, dest) {
   await fsp.mkdir(dest, { recursive: true });
@@ -27,6 +57,7 @@ export async function initProject(dir, { name, width = 1920, height = 1080, fps 
   }
   await fsp.mkdir(path.join(dir, 'media'), { recursive: true });
   await fsp.mkdir(path.join(dir, 'renders'), { recursive: true });
+  await installSkills(dir);
 
   const project = {
     version: 1,
