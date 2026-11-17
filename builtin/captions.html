@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="kadr:duration" content="6">
+<meta name="kadr:description" content="Social-style captions: a few words at a time, the spoken word highlighted. Give exact timing with props.words = [{w, s, e}] (seconds), otherwise words are spread evenly.">
+<meta name="kadr:props" content='{"text":"Captions that follow every word you say","perLine":3,"size":84,"color":"#ffffff","accent":"#e8ff59","ink":"#111111","y":78,"upper":true,"weight":"800"}'>
+<title>Captions</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  body { font-family: system-ui, sans-serif; }
+  .cap { position: absolute; left: 6%; right: 6%; display: flex; flex-wrap: wrap; justify-content: center; gap: .1em .22em; line-height: 1.1; text-align: center; }
+  .w { position: relative; display: inline-block; padding: .02em .14em .06em; border-radius: .14em; paint-order: stroke fill; -webkit-text-stroke: .1em rgba(0, 0, 0, .55); }
+  .w.on { -webkit-text-stroke: 0; }
+</style>
+</head>
+<body>
+<div class="cap" id="cap"></div>
+<script>
+  const P = (k, d) => kadr.prop(k, d);
+  const cap = document.getElementById('cap');
+  cap.style.fontSize = `${P('size', 84)}px`;
+  cap.style.fontWeight = P('weight', '800');
+  cap.style.top = `${P('y', 78)}%`;
+  cap.style.transform = 'translateY(-50%)';
+  const upper = P('upper', true) === true || P('upper', true) === 'true';
+  const D = kadr.duration;
+  // word timing: explicit [{w,s,e}] or evenly spread over the duration
+  let words = Array.isArray(kadr.props.words) ? kadr.props.words : null;
+  if (!words) {
+    const list = String(P('text', '')).split(/\s+/).filter(Boolean);
+    const per = (D - 0.2) / Math.max(1, list.length);
+    words = list.map((w, i) => ({ w, s: 0.1 + i * per, e: 0.1 + (i + 1) * per }));
+  }
+  const perLine = Math.max(1, Number(P('perLine', 3)));
+  const pages = [];
+  for (let i = 0; i < words.length; i += perLine) pages.push(words.slice(i, i + perLine));
+  let shown = -1;
+  let els = [];
+  kadr.onFrame((t) => {
+    let pi = pages.findIndex((pg) => t >= pg[0].s - 0.05 && t < pg[pg.length - 1].e);
+    if (pi < 0) pi = t < (pages[0]?.[0].s ?? 0) ? -1 : pages.length - 1;
+    if (pi !== shown) {
+      shown = pi;
+      cap.replaceChildren();
+      els = (pages[pi] || []).map((wd) => {
+        const s = document.createElement('span');
+        s.className = 'w';
+        s.textContent = upper ? wd.w.toUpperCase() : wd.w;
+        cap.append(s);
+        return s;
+      });
+    }
+    const pg = pages[pi] || [];
+    pg.forEach((wd, i) => {
+      const el = els[i];
+      const on = t >= wd.s && t < wd.e;
+      const appear = kadr.progressIn(t, pg[0].s - 0.05, pg[0].s + 0.12, 'outBack');
+      const pop = on ? kadr.interp(t, [wd.s, wd.s + 0.12], [1.12, 1], 'outCubic') : 1;
+      el.classList.toggle('on', on);
+      el.style.background = on ? P('accent', '#e8ff59') : 'transparent';
+      el.style.color = on ? P('ink', '#111111') : P('color', '#ffffff');
+      el.style.transform = `scale(${(0.85 + 0.15 * appear) * pop})`;
+      el.style.opacity = Math.min(1, appear * 1.5);
+    });
+  });
+</script>
+</body>
+</html>

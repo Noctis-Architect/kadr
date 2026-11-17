@@ -1,0 +1,3 @@
+# aider: load the kadr guide into every chat
+read:
+  - AGENTS.md

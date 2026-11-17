@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="kadr:duration" content="3">
+<meta name="kadr:description" content="Animated number with a progress ring.">
+<meta name="kadr:props" content='{"from":0,"to":100,"suffix":"%","label":"users","decimals":0,"accent":"#e8ff59"}'>
+<title>Counter</title>
+<!--
+  Number + progress ring. Shows JS + SVG driven by kadr.onFrame.
+  Props: from, to, suffix, label, accent, decimals
+-->
+<style>
+  :root { --accent: #e8ff59; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  body { font-family: system-ui, sans-serif; color: #fff; display: grid; place-items: center; }
+  .wrap { position: relative; width: 520px; height: 520px; display: grid; place-items: center; }
+  svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+  .num { font-size: 150px; font-weight: 800; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+  .label { position: absolute; bottom: 120px; font-size: 30px; opacity: .65; letter-spacing: .02em; }
+</style>
+</head>
+<body>
+  <div class="wrap" id="wrap">
+    <svg viewBox="0 0 520 520">
+      <circle cx="260" cy="260" r="240" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="14" />
+      <circle id="ring" cx="260" cy="260" r="240" fill="none" stroke="var(--accent)" stroke-width="14" stroke-linecap="round" />
+    </svg>
+    <div class="num" id="num">0</div>
+    <div class="label" data-prop="label">users</div>
+  </div>
+<script>
+  const from = Number(kadr.prop('from', 0));
+  const to = Number(kadr.prop('to', 100));
+  const suffix = String(kadr.prop('suffix', '%'));
+  const decimals = Number(kadr.prop('decimals', 0));
+  const ring = document.getElementById('ring');
+  const C = 2 * Math.PI * 240;
+  ring.style.strokeDasharray = C;
+
+  kadr.onFrame((t) => {
+    const p = kadr.progressIn(t, 0.2, 2.2, 'outCubic');
+    const v = from + (to - from) * p;
+    document.getElementById('num').textContent = v.toFixed(decimals) + suffix;
+    ring.style.strokeDashoffset = C * (1 - p);
+    const pop = kadr.interp(t, [0, 0.35], [0.85, 1], 'outBack');
+    document.getElementById('wrap').style.transform = `scale(${pop})`;
+    document.getElementById('wrap').style.opacity = kadr.interp(t, [0, 0.2], [0, 1]);
+  });
+</script>
+</body>
+</html>

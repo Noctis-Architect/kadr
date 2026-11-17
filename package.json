@@ -1,0 +1,11 @@
+{
+  "name": "kadr",
+  "version": "0.1.0",
+  "description": "Local, minimal video editor that coding agents (Claude Code, Codex, Aider, ...) can drive through plain files. HTML/CSS/JS motion graphics, ffmpeg export.",
+  "type": "module",
+  "bin": { "kadr": "bin/kadr.js" },
+  "engines": { "node": ">=22" },
+  "files": ["bin", "src", "shared", "runtime", "builtin", "template", "web"],
+  "scripts": { "start": "node bin/kadr.js serve" },
+  "license": "MIT"
+}

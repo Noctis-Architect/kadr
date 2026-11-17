@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="kadr:duration" content="4">
+<meta name="kadr:description" content="Kinetic type: words rise in one by one, *starred* words get the accent color.">
+<meta name="kadr:props" content='{"text":"Make *every* frame count","size":132,"color":"#f5f5f0","accent":"#e8ff59","weight":"800","align":"center","stagger":0.11,"y":0}'>
+<title>Kinetic type</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  body { font-family: system-ui, sans-serif; display: flex; align-items: center; }
+  .line { width: 100%; padding: 0 8%; box-sizing: border-box; display: flex; flex-wrap: wrap; column-gap: .26em; row-gap: .02em; line-height: 1.02; letter-spacing: -.035em; }
+  .w { display: inline-block; overflow: hidden; padding: .06em .02em .1em; margin: -.06em -.02em -.1em; }
+  .w > span { display: inline-block; will-change: transform, filter, opacity; }
+</style>
+</head>
+<body>
+<div class="line" id="line"></div>
+<script>
+  const P = (k, d) => kadr.prop(k, d);
+  const line = document.getElementById('line');
+  line.style.fontSize = `${P('size', 132)}px`;
+  line.style.fontWeight = P('weight', '800');
+  line.style.color = P('color', '#f5f5f0');
+  line.style.justifyContent = { left: 'flex-start', center: 'center', right: 'flex-end' }[P('align', 'center')] || 'center';
+  line.style.transform = `translateY(${Number(P('y', 0))}px)`;
+  const words = String(P('text', 'Make *every* frame count')).split(/\s+/).filter(Boolean).map((raw) => {
+    const hot = /^\*.*\*$/.test(raw);
+    const w = document.createElement('span');
+    w.className = 'w';
+    const inner = document.createElement('span');
+    inner.textContent = raw.replace(/^\*|\*$/g, '');
+    if (hot) inner.style.color = P('accent', '#e8ff59');
+    w.append(inner);
+    line.append(w);
+    return inner;
+  });
+  const stagger = Number(P('stagger', 0.11));
+  const D = kadr.duration;
+  kadr.onFrame((t) => {
+    const out = kadr.progressIn(t, D - 0.45, D, 'inCubic');
+    words.forEach((el, i) => {
+      const a = i * stagger;
+      const p = kadr.progressIn(t, a, a + 0.7, 'outExpo');
+      const o = kadr.progressIn(t, D - 0.45 + i * 0.03, D - 0.05 + i * 0.03, 'inCubic');
+      const y = (1 - p) * 105 - o * 105;
+      el.style.transform = `translateY(${y}%) rotate(${(1 - p) * 6}deg)`;
+      el.style.filter = p < 1 ? `blur(${(1 - p) * 6}px)` : 'none';
+      el.style.opacity = Math.min(1, p * 1.6) * (1 - out * 0.2);
+    });
+  });
+</script>
+</body>
+</html>

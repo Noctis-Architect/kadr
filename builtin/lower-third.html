@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="kadr:duration" content="5">
+<meta name="kadr:description" content="Lower third: name and role with a wiping box.">
+<meta name="kadr:props" content='{"name":"Your Name","role":"Role or title","accent":"#e8ff59"}'>
+<title>Lower third</title>
+<!--
+  JS-driven composition: kadr.onFrame(t => ...) sets styles from time t.
+  Never read the real clock (Date.now, performance.now, setTimeout) for animation.
+  Props: name, role, accent
+-->
+<style>
+  :root { --accent: #e8ff59; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  body { font-family: system-ui, sans-serif; }
+  .lt { position: absolute; left: 6%; bottom: 11%; display: flex; align-items: stretch; }
+  .bar { width: 8px; background: var(--accent); transform-origin: bottom; }
+  .box { background: rgba(12, 12, 14, .82); padding: 22px 34px 24px 28px; overflow: hidden; }
+  .name { color: #fff; font-size: 54px; font-weight: 700; letter-spacing: -.02em; line-height: 1.05; white-space: nowrap; }
+  .role { color: rgba(255, 255, 255, .66); font-size: 28px; font-weight: 500; margin-top: 8px; white-space: nowrap; }
+</style>
+</head>
+<body>
+  <div class="lt" id="lt">
+    <div class="bar" id="bar"></div>
+    <div class="box" id="box">
+      <div class="name" id="name" data-prop="name">Your Name</div>
+      <div class="role" id="role" data-prop="role">Role or title</div>
+    </div>
+  </div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const D = kadr.duration;           // 5, from the meta tag
+  const OUT = D - 0.6;               // start leaving 0.6s before the end
+
+  kadr.onFrame((t) => {
+    const k = kadr.interp;
+    $('bar').style.transform = `scaleY(${k(t, [0, 0.35], [0, 1], 'outCubic')})`;
+    $('box').style.clipPath = `inset(0 ${k(t, [0.15, 0.75], [100, 0], 'outExpo')}% 0 0)`;
+    $('name').style.transform = `translateX(${k(t, [0.25, 0.9], [-40, 0], 'outCubic')}px)`;
+    $('role').style.opacity = k(t, [0.5, 0.9], [0, 1]);
+
+    const leave = k(t, [OUT, D], [0, 1], 'inCubic');
+    $('lt').style.opacity = 1 - leave;
+    $('lt').style.transform = `translateY(${leave * 30}px)`;
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,493 @@
+#!/usr/bin/env node
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import {
+  normalizeProject, validateProject, projectDuration, tc, parseTime, uid, mediaKind, trackKindFor, clipEnd,
+} from '../shared/model.js';
+import { findRoot, readProject, writeProject, validateFull, APP_DIR, resolveSrc, compUrl } from '../src/project.js';
+import { Media, run, probe } from '../src/media.js';
+import { startServer } from '../src/server.js';
+import { renderProject } from '../src/render.js';
+import { Browser } from '../src/chrome.js';
+import { initProject } from '../src/init.js';
+
+const HELP = `kadr — local video editor that coding agents can drive
+
+usage: kadr <command> [options]          (run inside a project, or pass -C <dir>)
+
+project
+  init [dir] [--name n] [--size 1920x1080] [--fps 30] [--demo]
+                                  create a project (AGENTS.md, comps/, media/)
+  serve [dir] [--port 4310] [--open]
+                                  open the editor at http://127.0.0.1:4310
+  info                            summary: settings, tracks, every clip
+  validate                        check project.json + files; exit 1 on errors
+  state                           what the user has selected / where the playhead is
+  add <src> [--track V1] [--at 0] [--in 0] [--duration d] [--props '{}']
+                                  append a clip (duration probed from the file)
+
+look at things (all write PNGs and print their paths)
+  frame <t...> [-o out.png|dir]   composite timeline frames at times t
+  templates                       list built-in compositions (@kadr/...) and their props
+  sheet [file] [--count 12] [--cols 4] [-o out.png]
+                                  contact sheet with timestamps: of the timeline,
+                                  a video file, or an .html composition
+  comp <file.html> [t...] [--props '{}'] [--bg #000] [-o dir]
+                                  render a composition alone (prints console errors)
+
+media analysis (JSON)
+  probe <file>                    duration, size, fps, codecs
+  scenes <video> [--threshold 0.3]
+                                  scene-cut timestamps
+  silence <file> [--noise -35] [--min 0.4]
+                                  silent ranges (dB threshold, min seconds)
+
+media helpers (write new files into media/, print the path)
+  freeze <video> <sourceTime>     still PNG of one frame -> media/freeze/
+  reverse <file> [--in 0] [--span s]
+                                  reversed copy -> media/reversed/
+
+export
+  render [-o renders/out.mp4] [--from t] [--to t] [--crf 18] [--preset medium]
+         [--codec h264|h265|prores|av1|vp9] [--size 3840x2160] [--loudness -14]
+         [--motion-blur 8] [--shutter 180] [--workers n] [--no-cache]
+  clean                           delete cached renders in .kadr/cache
+
+times accept 12.5, 1:02.5, 00:01:02:15 (frames).`;
+
+function parseArgs(argv) {
+  const out = { _: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '-o') out.o = argv[++i];
+    else if (a === '-C') out.C = argv[++i];
+    else if (a.startsWith('--')) {
+      const [k, v] = a.slice(2).split('=');
+      if (v !== undefined) out[k] = v;
+      else if (argv[i + 1] !== undefined && !argv[i + 1].startsWith('--') && !['open', 'demo', 'no-cache', 'json', 'debug'].includes(k)) out[k] = argv[++i];
+      else out[k] = true;
+    } else out._.push(a);
+  }
+  return out;
+}
+
+const die = (msg, code = 1) => { console.error(`kadr: ${msg}`); process.exit(code); };
+
+function projectRoot(args) {
+  const root = findRoot(args.C || process.cwd());
+  if (!root) die('no project.json here or in any parent folder (run "kadr init" first, or pass -C <dir>)');
+  return root;
+}
+
+async function withServer(root, fn) {
+  const srv = await startServer({ root, port: 0, ui: false, watch: false, quiet: true });
+  try { return await fn(srv); } finally { await srv.close(); }
+}
+
+function progressBar() {
+  if (!process.stderr.isTTY) return () => {};
+  let last = '';
+  return (pr) => {
+    const pct = Math.round(pr.progress * 100);
+    const bar = '#'.repeat(Math.round(pct / 4)).padEnd(25, '.');
+    const line = `\r${bar} ${String(pct).padStart(3)}%  ${pr.phase}${pr.detail ? `  ${pr.detail}` : ''}`;
+    if (line !== last) { process.stderr.write(line.padEnd(80)); last = line; }
+    if (pr.phase === 'done') process.stderr.write('\n');
+  };
+}
+
+const rel = (root, p) => path.relative(process.cwd(), path.isAbsolute(p) ? p : path.join(root, p)) || '.';
+
+async function sheetFromPngs(pngs, labels, cols, out, cellW = 480) {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'kadr-sheet-'));
+  try {
+    const rows = Math.ceil(pngs.length / cols);
+    const args = ['-hide_banner', '-v', 'error', '-y'];
+    for (const p of pngs) args.push('-i', p);
+    const parts = [];
+    pngs.forEach((_, i) => {
+      const text = labels[i].replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
+      parts.push(`[${i}:v]scale=${cellW}:-2,format=rgba,pad=iw+8:ih+8:4:4:color=0x1a1a1a,drawtext=text='${text}':x=10:y=10:fontsize=18:fontcolor=white:box=1:boxcolor=black@0.65:boxborderw=4[c${i}]`);
+    });
+    const n = pngs.length;
+    const layout = pngs.map((_, i) => {
+      const c = i % cols;
+      const r = Math.floor(i / cols);
+      const x = c === 0 ? '0' : Array.from({ length: c }, () => 'w0').join('+');
+      const y = r === 0 ? '0' : Array.from({ length: r }, () => 'h0').join('+');
+      return `${x}_${y}`;
+    }).join('|');
+    if (n === 1) parts.push('[c0]null[out]');
+    else parts.push(`${pngs.map((_, i) => `[c${i}]`).join('')}xstack=inputs=${n}:layout=${layout}:fill=0x1a1a1a[out]`);
+    args.push('-filter_complex', parts.join(';'), '-map', '[out]', '-frames:v', '1', '-update', '1', out);
+    await run('ffmpeg', args);
+    return { out, rows };
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+}
+
+const commands = {
+  async help() { console.log(HELP); },
+
+  async init(args) {
+    const dir = path.resolve(args._[0] || '.');
+    const [w, h] = String(args.size || '1920x1080').split('x').map(Number);
+    await initProject(dir, { name: args.name, width: w, height: h, fps: Number(args.fps) || 30, demo: !!args.demo });
+    console.log(`created project in ${dir}\nnext: cd ${path.relative(process.cwd(), dir) || '.'} && kadr serve`);
+  },
+
+  async serve(args) {
+    const start = path.resolve(args._[0] || args.C || '.');
+    const root = findRoot(start);
+    if (!root) die(`no project.json in ${start}. Create one with: kadr init ${args._[0] || '.'}`);
+    let port = Number(args.port) || 4310;
+    let srv;
+    for (let i = 0; i < 20; i++) {
+      try { srv = await startServer({ root, port: port + i }); break; } catch (e) {
+        if (e.code !== 'EADDRINUSE') throw e;
+      }
+    }
+    if (!srv) die(`ports ${port}-${port + 19} are all busy`);
+    console.log(`kadr  ${srv.url}\nproject  ${root}\nctrl+c to stop`);
+    if (args.open) {
+      const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+      (await import('node:child_process')).spawn(cmd, [srv.url], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+    }
+    const stop = async () => { await srv.close(); process.exit(0); };
+    process.on('SIGINT', stop);
+    process.on('SIGTERM', stop);
+  },
+
+  async info(args) {
+    const root = projectRoot(args);
+    const raw = await readProject(root);
+    const p = normalizeProject(raw);
+    if (args.json) return console.log(JSON.stringify({ ...p, duration: projectDuration(p) }, null, 2));
+    const D = projectDuration(p);
+    console.log(`${p.name}  ${p.width}x${p.height} @ ${p.fps}fps  duration ${D.toFixed(3)}s (${tc(D, p.fps)})  bg ${p.background}`);
+    console.log(`root ${root}\n`);
+    console.log('tracks (bottom → top for video):');
+    for (const t of p.tracks) {
+      const n = p.clips.filter((c) => c.track === t.id).length;
+      console.log(`  ${t.id.padEnd(4)} ${t.kind.padEnd(5)} ${String(n).padStart(3)} clips${t.hidden ? '  hidden' : ''}${t.muted ? '  muted' : ''}${t.name ? `  "${t.name}"` : ''}`);
+    }
+    if (p.markers.length) {
+      console.log('\nmarkers:');
+      for (const m of p.markers) console.log(`  ${m.id.padEnd(8)} ${m.t.toFixed(3).padStart(8)}s  ${m.note || ''}`);
+    }
+    console.log('\nclips:');
+    console.log(`  ${'id'.padEnd(8)} ${'track'.padEnd(5)} ${'type'.padEnd(5)} ${'start'.padStart(8)} ${'end'.padStart(8)} ${'in'.padStart(7)}  src`);
+    const order = new Map(p.tracks.map((t, i) => [t.id, i]));
+    for (const c of [...p.clips].sort((a, b) => (order.get(a.track) ?? 0) - (order.get(b.track) ?? 0) || a.start - b.start)) {
+      const extra = [];
+      if (c.props && Object.keys(c.props).length) extra.push(`props ${JSON.stringify(c.props)}`);
+      for (const k of ['x', 'y']) if (c[k]) extra.push(`${k}=${c[k]}`);
+      if (c.scale !== 1) extra.push(`scale=${c.scale}`);
+      if (c.opacity !== 1) extra.push(`opacity=${c.opacity}`);
+      if (c.volume !== 1) extra.push(`vol=${c.volume}`);
+      if (c.fadeIn) extra.push(`fadeIn=${c.fadeIn}`);
+      if (c.fadeOut) extra.push(`fadeOut=${c.fadeOut}`);
+      if (c.fit !== 'contain') extra.push(`fit=${c.fit}`);
+      if (c.disabled) extra.push('DISABLED');
+      console.log(`  ${c.id.padEnd(8)} ${c.track.padEnd(5)} ${c.type.padEnd(5)} ${c.start.toFixed(3).padStart(8)} ${clipEnd(c).toFixed(3).padStart(8)} ${c.in.toFixed(2).padStart(7)}  ${c.src}${extra.length ? `  · ${extra.join(' ')}` : ''}`);
+    }
+  },
+
+  async validate(args) {
+    const root = projectRoot(args);
+    let raw;
+    try { raw = await readProject(root); } catch (e) { die(e.message); }
+    const media = new Media(root);
+    await media.load();
+    const { errors, warnings } = await validateFull(root, raw, media);
+    for (const e of errors) console.log(`error   ${e}`);
+    for (const w of warnings) console.log(`warning ${w}`);
+    if (!errors.length) {
+      const p = normalizeProject(raw);
+      console.log(`ok — ${p.clips.length} clips, ${projectDuration(p).toFixed(3)}s${warnings.length ? `, ${warnings.length} warning(s)` : ''}`);
+    }
+    process.exitCode = errors.length ? 1 : 0;
+  },
+
+  async state(args) {
+    const root = projectRoot(args);
+    try { process.stdout.write(await fsp.readFile(path.join(root, '.kadr', 'state.json'), 'utf8')); } catch {
+      console.log('{}  (the editor has not been opened yet)');
+    }
+  },
+
+  async add(args) {
+    const root = projectRoot(args);
+    const src = args._[0];
+    if (!src) die('usage: kadr add <src> [--track V1] [--at 0] [--in 0] [--duration d]');
+    const raw = await readProject(root);
+    const p = normalizeProject(raw);
+    const isBuiltin = src.startsWith('@kadr/');
+    const abs = resolveSrc(root, src);
+    if (!abs || !fs.existsSync(abs)) die(`file not found: ${src}`);
+    const kind = isBuiltin ? 'html' : mediaKind(src);
+    if (!kind) die(`unsupported file type: ${src}`);
+    const media = new Media(root);
+    await media.load();
+    const info = isBuiltin ? await probe(abs) : await media.info(src);
+    const tk = trackKindFor(kind);
+    const track = args.track || (tk === 'audio' ? p.tracks.find((t) => t.kind === 'audio') : (kind === 'video' ? p.tracks.find((t) => t.kind === 'video') : [...p.tracks].reverse().find((t) => t.kind === 'video')))?.id;
+    if (!track || !p.tracks.find((t) => t.id === track)) die(`no ${tk} track "${track ?? ''}" — add one to "tracks" first`);
+    const at = args.at != null ? parseTime(args.at, p.fps) : p.clips.filter((c) => c.track === track).reduce((m, c) => Math.max(m, clipEnd(c)), 0);
+    const inPt = args.in != null ? parseTime(args.in, p.fps) : 0;
+    let duration = args.duration != null ? parseTime(args.duration, p.fps) : null;
+    if (duration == null) duration = kind === 'image' ? 5 : kind === 'html' ? (info.duration || 5) : Math.max(0.1, (info.duration || 5) - inPt);
+    const clip = { id: uid('c', new Set(p.clips.map((c) => c.id))), track, type: kind, src, start: at, duration };
+    if (inPt) clip.in = inPt;
+    if (args.props) clip.props = JSON.parse(args.props);
+    raw.clips = [...(raw.clips || []), clip];
+    const v = validateProject(raw);
+    if (v.errors.length) die(v.errors.join('\n'));
+    await writeProject(root, raw);
+    console.log(`added ${clip.id}: ${kind} on ${track}, ${at.toFixed(3)}s → ${(at + duration).toFixed(3)}s`);
+    for (const w of v.warnings) console.log(`warning ${w}`);
+  },
+
+  async frame(args) {
+    const root = projectRoot(args);
+    const raw = await readProject(root);
+    const p = normalizeProject(raw);
+    const times = args._.map((t) => parseTime(t, p.fps));
+    if (!times.length || times.some((t) => !Number.isFinite(t))) die('usage: kadr frame <time...> [-o out.png|dir]');
+    const outDir = args.o && !args.o.endsWith('.png') ? path.resolve(args.o) : path.join(root, '.kadr', 'frames');
+    const media = new Media(root);
+    await media.load();
+    await withServer(root, async (srv) => {
+      for (const t of times) {
+        const out = args.o?.endsWith('.png') && times.length === 1 ? path.resolve(args.o) : path.join(outDir, `frame-${t.toFixed(3)}.png`);
+        const r = await renderProject({ root, baseUrl: srv.url, media, project: raw, out, from: t, still: true, debug: args.debug });
+        console.log(rel(root, out));
+        for (const l of r.logs) console.log(`  console ${l}`);
+      }
+    });
+  },
+
+  async sheet(args) {
+    const root = projectRoot(args);
+    const raw = await readProject(root);
+    const p = normalizeProject(raw);
+    const count = Math.max(1, Math.min(48, Number(args.count) || 12));
+    const cols = Number(args.cols) || Math.min(4, count);
+    const target = args._[0];
+    const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'kadr-frames-'));
+    const pngs = [];
+    const labels = [];
+    const media = new Media(root);
+    await media.load();
+    try {
+      if (!target) {
+        const D = projectDuration(p);
+        if (!D) die('timeline is empty');
+        await withServer(root, async (srv) => {
+          for (let i = 0; i < count; i++) {
+            const t = Math.min(D - 1 / p.fps, (D * (i + 0.5)) / count);
+            const out = path.join(tmp, `${i}.png`);
+            await renderProject({ root, baseUrl: srv.url, media, project: raw, out, from: t, still: true });
+            pngs.push(out);
+            labels.push(`${t.toFixed(2)}s  ${tc(t, p.fps)}`);
+          }
+        });
+      } else if (mediaKind(target) === 'html') {
+        await withServer(root, async (srv) => {
+          const isBuiltin = target.startsWith('@kadr/');
+          const absT = isBuiltin ? resolveSrc(root, target) : path.resolve(target);
+          const info = await probe(absT);
+          const D = info.duration || 5;
+          const b = await Browser.launch();
+          try {
+            const page = await b.newPage(p.width, p.height, { background: args.bg || '#000000' });
+            const src = isBuiltin ? target : path.relative(root, absT).split(path.sep).join('/');
+            await page.goto(compUrl(srv.url, src, args.props ? JSON.parse(args.props) : null, { 'kadr-render': 1 }));
+            for (let i = 0; i < count; i++) {
+              const t = (D * i) / Math.max(1, count - 1) - (i === count - 1 ? 1 / p.fps : 0);
+              await page.seek(Math.max(0, t));
+              const out = path.join(tmp, `${i}.png`);
+              await fsp.writeFile(out, await page.screenshot());
+              pngs.push(out);
+              labels.push(`${Math.max(0, t).toFixed(2)}s`);
+            }
+            for (const l of page.logs) console.log(`console ${l}`);
+          } finally { await b.close(); }
+        });
+      } else {
+        const abs = path.resolve(target);
+        const info = await probe(abs);
+        if (!info.hasVideo) die(`${target} has no video`);
+        for (let i = 0; i < count; i++) {
+          const t = (info.duration * (i + 0.5)) / count;
+          const out = path.join(tmp, `${i}.png`);
+          await run('ffmpeg', ['-hide_banner', '-v', 'error', '-y', '-ss', t.toFixed(3), '-i', abs, '-frames:v', '1', '-update', '1', out]);
+          pngs.push(out);
+          labels.push(`${t.toFixed(2)}s`);
+        }
+      }
+      const name = target ? path.basename(target).replace(/\.\w+$/, '') : 'timeline';
+      if (!target) { /* timeline */ }
+      const out = args.o ? path.resolve(args.o) : path.join(root, '.kadr', 'frames', `sheet-${name}.png`);
+      await fsp.mkdir(path.dirname(out), { recursive: true });
+      await sheetFromPngs(pngs, labels, cols, out, Number(args.width) || 480);
+      console.log(rel(root, out));
+    } finally {
+      await fsp.rm(tmp, { recursive: true, force: true });
+    }
+  },
+
+  async comp(args) {
+    const root = projectRoot(args);
+    const file = args._[0];
+    if (!file || mediaKind(file) !== 'html') die('usage: kadr comp <file.html> [t...] [--props json] [--bg #000]');
+    const isBuiltin = file.startsWith('@kadr/');
+    const abs = isBuiltin ? resolveSrc(root, file) : path.resolve(file);
+    const src = isBuiltin ? file : path.relative(root, abs).split(path.sep).join('/');
+    if (!abs || !fs.existsSync(abs)) die(`not found: ${file}`);
+    if (src.startsWith('..')) die('the composition must be inside the project folder (or a built-in like @kadr/kinetic.html)');
+    const raw = await readProject(root);
+    const p = normalizeProject(raw);
+    const info = await probe(abs);
+    const D = info.duration || 5;
+    let times = args._.slice(1).map((t) => parseTime(t, p.fps));
+    if (!times.length) times = [0, D * 0.25, D * 0.5, D * 0.75, D - 1 / p.fps].map((t) => Math.max(0, t));
+    const outDir = path.resolve(args.o || path.join(root, '.kadr', 'frames'));
+    await fsp.mkdir(outDir, { recursive: true });
+    await withServer(root, async (srv) => {
+      const b = await Browser.launch();
+      try {
+        const page = await b.newPage(p.width, p.height, { background: args.bg || null });
+        await page.goto(compUrl(srv.url, src, args.props ? JSON.parse(args.props) : null, { 'kadr-render': 1 }));
+        const name = path.basename(file).replace(/\.\w+$/, '');
+        for (const t of times) {
+          await page.seek(t);
+          const out = path.join(outDir, `${name}-${t.toFixed(3)}.png`);
+          await fsp.writeFile(out, await page.screenshot());
+          console.log(rel(root, out));
+        }
+        if (page.logs.length) for (const l of page.logs) console.log(`console ${l}`);
+        else console.log('console: no errors');
+      } finally { await b.close(); }
+    });
+  },
+
+  async templates() {
+    const dir = path.join(APP_DIR, 'builtin');
+    for (const f of (await fsp.readdir(dir)).filter((x) => x.endsWith('.html')).sort()) {
+      const info = await probe(path.join(dir, f));
+      console.log(`@kadr/${f}  (${info.duration ?? '?'}s)  ${info.description || info.title || ''}`);
+      if (info.props) console.log(`    props ${JSON.stringify(info.props)}`);
+    }
+  },
+
+  async probe(args) {
+    const f = args._[0];
+    if (!f) die('usage: kadr probe <file>');
+    console.log(JSON.stringify(await probe(path.resolve(f)), null, 2));
+  },
+
+  async freeze(args) {
+    const [f, t] = args._;
+    if (!f || t == null) die('usage: kadr freeze <video> <sourceTime>');
+    const root = projectRoot(args);
+    const media = new Media(root);
+    await media.load();
+    console.log(await media.freeze(path.relative(root, path.resolve(f)), parseTime(t)));
+  },
+
+  async reverse(args) {
+    const f = args._[0];
+    if (!f) die('usage: kadr reverse <file> [--in 0] [--span s]');
+    const root = projectRoot(args);
+    const media = new Media(root);
+    await media.load();
+    const rel = path.relative(root, path.resolve(f));
+    const info = await media.info(rel);
+    const inT = args.in != null ? parseTime(args.in) : 0;
+    const span = args.span != null ? parseTime(args.span) : (info.duration || 0) - inT;
+    console.log(await media.reverse(rel, inT, span));
+  },
+
+  async scenes(args) {
+    const f = args._[0];
+    if (!f) die('usage: kadr scenes <video> [--threshold 0.3]');
+    const th = Number(args.threshold) || 0.3;
+    const { stdout } = await run('ffmpeg', ['-hide_banner', '-v', 'error', '-i', path.resolve(f), '-an', '-vf', `select='gt(scene,${th})',metadata=print:file=-`, '-f', 'null', '-'], { stderr: true });
+    const cuts = [];
+    const re = /pts_time:([\d.]+)[\s\S]*?lavfi\.scene_score=([\d.]+)/g;
+    let m;
+    while ((m = re.exec(stdout))) cuts.push({ t: Math.round(Number(m[1]) * 1000) / 1000, score: Math.round(Number(m[2]) * 1000) / 1000 });
+    console.log(JSON.stringify({ file: f, threshold: th, cuts }, null, 2));
+  },
+
+  async silence(args) {
+    const f = args._[0];
+    if (!f) die('usage: kadr silence <file> [--noise -35] [--min 0.4]');
+    const noise = Number(args.noise ?? -35);
+    const min = Number(args.min ?? 0.4);
+    const info = await probe(path.resolve(f));
+    const { stderr } = await run('ffmpeg', ['-hide_banner', '-nostats', '-i', path.resolve(f), '-vn', '-af', `silencedetect=n=${noise}dB:d=${min}`, '-f', 'null', '-'], { stderr: true });
+    const out = [];
+    let cur = null;
+    for (const l of stderr.split('\n')) {
+      const s = l.match(/silence_start: (-?[\d.]+)/);
+      const e = l.match(/silence_end: ([\d.]+)/);
+      if (s) cur = { start: Math.max(0, Number(s[1])) };
+      if (e && cur) { cur.end = Number(e[1]); out.push(cur); cur = null; }
+    }
+    if (cur) { cur.end = info.duration; out.push(cur); }
+    const r = (n) => Math.round(n * 1000) / 1000;
+    console.log(JSON.stringify({ file: f, duration: info.duration, noiseDb: noise, minSeconds: min, silences: out.map((x) => ({ start: r(x.start), end: r(x.end) })) }, null, 2));
+  },
+
+  async render(args) {
+    const root = projectRoot(args);
+    const raw = await readProject(root);
+    const p = normalizeProject(raw);
+    const ext = args.codec === 'prores' ? 'mov' : args.codec === 'vp9' ? 'webm' : 'mp4';
+    const out = path.resolve(args.o || path.join(root, 'renders', `${(p.name || 'export').replace(/[^\w.-]+/g, '_')}.${ext}`));
+    const media = new Media(root);
+    await media.load();
+    const { errors, warnings } = await validateFull(root, raw, media);
+    for (const w of warnings) console.error(`warning ${w}`);
+    if (errors.length) die(`project has errors:\n${errors.map((e) => `  ${e}`).join('\n')}`);
+    const t0 = Date.now();
+    const r = await withServer(root, (srv) => renderProject({
+      root, baseUrl: srv.url, media, project: raw, out,
+      from: args.from != null ? parseTime(args.from, p.fps) : undefined,
+      to: args.to != null ? parseTime(args.to, p.fps) : undefined,
+      crf: args.crf != null ? Number(args.crf) : undefined, preset: args.preset, codec: args.codec,
+      width: args.size ? Number(String(args.size).split('x')[0]) : undefined,
+      height: args.size ? Number(String(args.size).split('x')[1]) : undefined,
+      loudness: args.loudness != null ? Number(args.loudness) : undefined,
+      motionBlur: args['motion-blur'] != null ? Number(args['motion-blur']) : undefined,
+      shutter: args.shutter != null ? Number(args.shutter) : undefined,
+      workers: args.workers ? Number(args.workers) : undefined, noCache: !!args['no-cache'], debug: !!args.debug,
+      onProgress: progressBar(),
+    }));
+    for (const l of r.logs) console.error(`console ${l}`);
+    console.log(`${rel(root, out)}  ${r.codec} ${r.size}${r.loudness ? ` ${r.loudness} LUFS` : ''}  (${r.duration.toFixed(2)}s of video in ${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+  },
+
+  async clean(args) {
+    const root = projectRoot(args);
+    const dir = path.join(root, '.kadr', 'cache');
+    let n = 0;
+    for (const f of await fsp.readdir(dir).catch(() => [])) {
+      if (f.startsWith('comp-')) { await fsp.rm(path.join(dir, f), { force: true }); n++; }
+    }
+    console.log(`removed ${n} cached composition renders`);
+  },
+};
+
+process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0); });
+const [cmd = 'help', ...rest] = process.argv.slice(2);
+const fn = commands[cmd] || (cmd === '--help' || cmd === '-h' ? commands.help : null);
+if (!fn) die(`unknown command "${cmd}" — run "kadr help"`);
+fn(parseArgs(rest)).catch((e) => die(e.message));
+
+export { APP_DIR };

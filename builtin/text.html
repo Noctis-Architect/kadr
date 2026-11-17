@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="kadr:duration" content="5">
+<meta name="kadr:description" content="Simple text: title, caption or label.">
+<meta name="kadr:props" content='{"text":"Title","size":96,"color":"#ffffff","weight":"700","font":"system-ui, sans-serif","align":"center","valign":"middle","pad":120,"bg":"","anim":"fade","animDur":0.6,"letter":-0.01}'>
+<title>Text</title>
+<!--
+  Built-in text clip. Props:
+    text, size (px), color, weight, font, align (left|center|right),
+    valign (top|middle|bottom), pad (px), bg (box color, "" = none),
+    anim (none|fade|rise|type), animDur (s), letter (letter-spacing em)
+-->
+<style>
+  :root { --size: 96; --color: #ffffff; --weight: 700; --font: system-ui, sans-serif; --pad: 120; --bg: transparent; --letter: -0.01; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  .wrap { position: absolute; inset: 0; display: flex; padding: calc(var(--pad) * 1px); box-sizing: border-box; }
+  .box { display: inline-block; max-width: 100%; background: var(--bg); padding: 0.18em 0.4em; border-radius: 0.08em; }
+  .txt {
+    font-family: var(--font); font-size: calc(var(--size) * 1px); font-weight: var(--weight);
+    color: var(--color); line-height: 1.08; letter-spacing: calc(var(--letter) * 1em);
+    white-space: pre-wrap; word-break: break-word;
+  }
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap"><div class="box" id="box"><div class="txt" id="txt">Title</div></div></div>
+<script>
+  const p = kadr.props;
+  const txt = document.getElementById('txt');
+  const box = document.getElementById('box');
+  const wrap = document.getElementById('wrap');
+  const full = String(kadr.prop('text', 'Title'));
+  txt.textContent = full;
+  const align = kadr.prop('align', 'center');
+  const valign = kadr.prop('valign', 'middle');
+  wrap.style.justifyContent = { left: 'flex-start', center: 'center', right: 'flex-end' }[align] || 'center';
+  wrap.style.alignItems = { top: 'flex-start', middle: 'center', bottom: 'flex-end' }[valign] || 'center';
+  txt.style.textAlign = align;
+  if (!p.bg) box.style.padding = '0';
+
+  const anim = kadr.prop('anim', 'fade');
+  const d = Number(kadr.prop('animDur', 0.6));
+  kadr.onFrame((t) => {
+    if (anim === 'fade') {
+      box.style.opacity = kadr.interp(t, [0, d], [0, 1], 'outCubic');
+    } else if (anim === 'rise') {
+      box.style.opacity = kadr.interp(t, [0, d * 0.7], [0, 1]);
+      const size = Number(kadr.prop('size', 96));
+      box.style.transform = `translateY(${kadr.interp(t, [0, d], [size * 0.4, 0], 'outCubic')}px)`;
+    } else if (anim === 'type') {
+      const n = Math.round(kadr.interp(t, [0, Math.max(d, full.length * 0.04)], [0, full.length]));
+      txt.textContent = full.slice(0, n);
+    } else {
+      box.style.opacity = 1;
+    }
+  });
+</script>
+</body>
+</html>

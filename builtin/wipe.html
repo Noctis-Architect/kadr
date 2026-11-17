@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="kadr:duration" content="1.2">
+<meta name="kadr:description" content="Transition: colored panels sweep across and fully cover the frame at the midpoint. Put it on the top track centered on a cut (start = cut - duration/2).">
+<meta name="kadr:props" content='{"color1":"#e8ff59","color2":"#1d1d22","color3":"#ffffff","direction":"left","skew":-12}'>
+<title>Wipe transition</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  .p { position: absolute; inset: -20% -30%; will-change: transform; }
+</style>
+</head>
+<body>
+<div class="p" id="a"></div><div class="p" id="b"></div><div class="p" id="c"></div>
+<script>
+  const P = (k, d) => kadr.prop(k, d);
+  const els = ['a', 'b', 'c'].map((id) => document.getElementById(id));
+  els[0].style.background = P('color1', '#e8ff59');
+  els[1].style.background = P('color2', '#1d1d22');
+  els[2].style.background = P('color3', '#ffffff');
+  els[2].style.opacity = 0;
+  const dir = P('direction', 'left');
+  const horiz = dir === 'left' || dir === 'right';
+  const sign = dir === 'left' || dir === 'up' ? -1 : 1;
+  const skew = Number(P('skew', -12));
+  const D = kadr.duration;
+  const half = D / 2;
+  kadr.onFrame((t) => {
+    // panel = 160% of the frame wide; 85% of its own width = fully off screen
+    els.slice(0, 2).forEach((el, i) => {
+      const d = i * D * 0.1;
+      const inP = kadr.progressIn(t, d, half, 'outCubic');
+      const outP = kadr.progressIn(t, half + d * 0.5, D, 'inCubic');
+      const pos = (1 - inP) * 85 * -sign + outP * 85 * sign;
+      el.style.transform = horiz
+        ? `translateX(${pos}%) skewX(${skew}deg)`
+        : `translateY(${pos}%) skewY(${skew}deg)`;
+    });
+  });
+</script>
+</body>
+</html>
