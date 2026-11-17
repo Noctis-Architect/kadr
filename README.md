@@ -1,5 +1,7 @@
 # kadr
 
+**English** · [فارسی](README.fa.md)
+
 A local video editor that coding agents can drive. No API keys: Claude Code,
 Codex, Aider, Gemini CLI and others work on the same plain files the editor
 shows, and the preview updates as they save.
