@@ -66,6 +66,8 @@ cd ~/projects/kadr && npm link      # puts `kadr` on your PATH
 
 ## Desktop app
 
+Website and tutorials: https://noctis-architect.github.io/kadr/
+
 Installers for Windows, macOS and Linux are on the
 [Releases](https://github.com/Noctis-Architect/kadr/releases) page. The app
 bundles its own Node; you still need ffmpeg and Chrome/Chromium/Edge. It opens

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en" data-page="doc-export" data-root="..">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Export · kadr</title>
+<meta name="theme-color" content="#070708">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800;900&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600;700&family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap">
+<script>(function(){var d=document.documentElement,l,t;try{l=localStorage.getItem('kadr-lang');t=localStorage.getItem('kadr-theme')}catch(e){}if(!l){l=(navigator.languages||[navigator.language]).some(function(x){return /^fa\b/i.test(x||'')})?'fa':'en'}d.dataset.lang=l;d.lang=l;d.dir=l==='fa'?'rtl':'ltr';if(t)d.dataset.theme=t;d.dataset.themeNow=t||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark')})();</script>
+<link rel="stylesheet" href="../assets/site.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+<script type="module" src="../assets/site.js"></script>
+<script type="module" src="../assets/demos.js"></script>
+</head>
+<body>
+
+<div class="wrap docs">
+  <nav class="side" aria-label="Tutorials"></nav>
+  <article class="prose">
+    <div class="crumb"><span lang="en">TUTORIAL 07</span><span lang="fa">آموزش 07</span></div>
+    <h1><span lang="en">Export, <em>delivery-grade.</em></span><span lang="fa">خروجی، <em>در حد پخش.</em></span></h1>
+    <p class="intro"><span lang="en"><strong>Ctrl+E</strong>, pick a preset, done. Or tune every knob.</span><span lang="fa"><strong>Ctrl+E</strong>، یه پریست انتخاب کن، تمام. یا همه‌ی تنظیمات رو خودت دقیق کن.</span></p>
+
+    <h2 id="presets"><span lang="en">Presets</span><span lang="fa">پریست‌ها</span></h2>
+    <table class="tbl"><thead><tr><th><span lang="en">Preset</span><span lang="fa">پریست</span></th><th><span lang="en">What you get</span><span lang="fa">چی می‌گیری</span></th></tr></thead><tbody>
+      <tr><td>Web</td><td>H.264 High · −14 LUFS</td></tr>
+      <tr><td>Social</td><td><span lang="en">H.264 · motion blur · −14 LUFS</span><span lang="fa">H.264 · موشن‌بلور · −14 LUFS</span></td></tr>
+      <tr><td>Master</td><td><span lang="en">ProRes 422 HQ, 10-bit .mov</span><span lang="fa">ProRes 422 HQ، فایل .mov ده‌بیتی</span></td></tr>
+      <tr><td>Small</td><td><span lang="en">H.265, about half the size</span><span lang="fa">H.265، حدوداً نصف حجم</span></td></tr>
+      <tr><td>Draft</td><td><span lang="en">Fast, for review</span><span lang="fa">سریع، برای بازبینی</span></td></tr>
+    </tbody></table>
+
+    <h2 id="codecs"><span lang="en">Codecs and size</span><span lang="fa">کدک و اندازه</span></h2>
+    <p><span lang="en">H.264 High, H.265, ProRes 422 HQ 10-bit, AV1 and VP9, tagged BT.709. Output can be scaled to 720p, 1080p, 1440p or 4K.</span><span lang="fa">H.264 High، H.265، ProRes 422 HQ ده‌بیتی، AV1 و VP9، با تگ BT.709. خروجی می‌تونه به 720p، 1080p، 1440p یا 4K تغییر اندازه بده.</span></p>
+
+    <h2 id="loudness"><span lang="en">Loudness</span><span lang="fa">بلندی صدا</span></h2>
+    <p><span lang="en">Two-pass EBU R128 normalization: −14 LUFS for YouTube and Instagram, −16 for podcasts, −23 for broadcast.</span><span lang="fa">یکسان‌سازی دومرحله‌ای EBU R128: ‎−14 LUFS برای یوتیوب و اینستاگرام، ‎−16 برای پادکست، ‎−23 برای تلویزیون.</span></p>
+
+    <h2 id="blur"><span lang="en">Motion blur</span><span lang="fa">موشن‌بلور</span></h2>
+    <p><span lang="en">For motion graphics kadr renders sub-frames over a 180° shutter and blends them, like a real camera.</span><span lang="fa">برای موشن‌گرافیک، کادر چند زیرفریم با شاتر ۱۸۰ درجه رندر و ترکیب می‌کنه، مثل یه دوربین واقعی.</span></p>
+
+    <h2 id="cli"><span lang="en">From the command line</span><span lang="fa">از خط فرمان</span></h2>
+    <div class="term" data-term="render"></div>
+    <div class="cb" data-title="bash"><pre>kadr render -o renders/final.mp4 --from 0 --to 30
+kadr render --codec prores                     # master
+kadr render --size 3840x2160 --loudness -14    # 4K for YouTube
+kadr render --motion-blur 8 --shutter 180</pre></div>
+
+  </article>
+  <aside class="toc"></aside>
+</div>
+</body>
+</html>
