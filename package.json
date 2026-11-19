@@ -1,6 +1,6 @@
 {
   "name": "kadr",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local, minimal video editor that coding agents (Claude Code, Codex, Aider, ...) can drive through plain files. HTML/CSS/JS motion graphics, ffmpeg export.",
   "type": "module",
   "bin": {
