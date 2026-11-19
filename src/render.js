@@ -13,13 +13,30 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { normalizeProject, validateProject, projectDuration, placement, fadeAt, transitions, clipWindow, valueAt, isAnimated, maxScale, resolveAt, transitionOffset, transitionOffsetExpr } from '../shared/model.js';
+import {
+  normalizeProject, validateProject, projectDuration, placement, fadeAt, transitions, clipWindow, valueAt, isAnimated, maxScale, resolveAt,
+  transitionOffset, transitionOffsetExpr, colorMatrix, vignetteMap, maskMap, maskOf, keyOf, spillType, panGains, maxBlur, audibleTrack, BLENDS,
+} from '../shared/model.js';
 import { Browser } from './chrome.js';
 import { resolveSrc, compUrl, BUILTIN_DIR } from './project.js';
 import { run } from './media.js';
 
 const f4 = (n) => Number(n).toFixed(4);
 const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+/** A PAM image (RGBA), which ffmpeg reads as a still: vignette and mask maps. */
+const pam = (w, h, rgba) => Buffer.concat([Buffer.from(`P7\nWIDTH ${w}\nHEIGHT ${h}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n`), rgba]);
+
+// Blend modes as ffmpeg filters, checked against the CSS formulas:
+// [clip is the first input, filter]; otherwise the frame under the clip is first.
+// Soft light has no built-in match, so it is the W3C formula as a 2-input lookup
+// table (x = frame under, y = clip), computed once instead of per pixel.
+const SL = "'if(lte(y,127.5),x-(255-2*y)*x*(255-x)/65025,x+(2*y-255)*(if(lte(x,63.75),((16*x/255-12)*x/255+4)*x,sqrt(x/255)*255)-x)/255)'";
+const BLEND_FF = {
+  multiply: [false, 'blend=all_mode=multiply'], screen: [false, 'blend=all_mode=screen'], overlay: [false, 'blend=all_mode=overlay'],
+  softLight: [false, `lut2=c0=${SL}:c1=${SL}:c2=${SL}`], hardLight: [false, 'blend=all_mode=hardlight'], darken: [false, 'blend=all_mode=darken'],
+  lighten: [false, 'blend=all_mode=lighten'], colorDodge: [true, 'blend=all_mode=dodge'], colorBurn: [true, 'blend=all_mode=burn'],
+  difference: [false, 'blend=all_mode=difference'], exclusion: [false, 'blend=all_mode=exclusion'],
+};
 
 async function dirSignature(dir) {
   const parts = [];
@@ -122,6 +139,15 @@ export async function renderComp(ctx, { src, props, t0, frames, step, still }) {
   }
   return out;
 }
+
+/** Audio-only exports: the mix alone, by file extension. */
+const AUDIO_EXT = ['.wav', '.mp3', '.m4a', '.flac'];
+const AUDIO_ARGS = {
+  '.wav': ['-c:a', 'pcm_s24le'],
+  '.mp3': ['-c:a', 'libmp3lame', '-b:a', '320k'],
+  '.m4a': ['-c:a', 'aac', '-b:a', '256k', '-movflags', '+faststart'],
+  '.flac': ['-c:a', 'flac'],
+};
 
 export const CODECS = {
   h264: { ext: ['.mp4', '.mov', '.m4v'], pix: 'yuv420p' },
@@ -240,7 +266,10 @@ export async function renderProject(o) {
   const D = to - from;
   const OW = o.width ? even(o.width) : W;
   const OH = o.height ? even(o.height) : H;
-  const codec = still ? null : pickCodec(out, o.codec);
+  const outExt = path.extname(out).toLowerCase();
+  const gif = !still && outExt === '.gif';
+  const audioOnly = !still && AUDIO_EXT.includes(outExt);
+  const codec = still ? null : gif ? 'gif' : audioOnly ? outExt.slice(1) : pickCodec(out, o.codec);
   const cacheDir = path.join(root, '.kadr', 'cache');
   await fsp.mkdir(cacheDir, { recursive: true });
 
@@ -260,7 +289,7 @@ export async function renderProject(o) {
 
   // --- progress model ------------------------------------------------------
   const logs = new Set();
-  const comps = items.filter((x) => x.c.type === 'html' && !x.tracks.hidden);
+  const comps = audioOnly ? [] : items.filter((x) => x.c.type === 'html' && !x.tracks.hidden);
   const compFrames = comps.reduce((n, x) => n + (still ? 1 : Math.max(1, Math.round((x.e - x.s) * fps))), 0);
   const wComp = compFrames ? (o.motionBlur > 1 ? 0.7 : 0.5) : 0;
   const wLoud = o.loudness && !still ? 0.05 : 0;
@@ -309,8 +338,8 @@ export async function renderProject(o) {
     const cut = s - c.start; // clip-local second where the window starts (< 0 inside a dissolve head)
     const off = s - from; // where the window lands in the output
     const T0 = c.start - from; // output time of the clip's own start
-    const wantV = c.type !== 'audio' && !tr0.hidden;
-    let wantA = !still && !tr0.muted && (c.volume > 0 || isAnimated(c, 'volume')) && (c.type === 'audio' || c.type === 'video');
+    const wantV = !audioOnly && c.type !== 'audio' && !tr0.hidden;
+    let wantA = !still && !gif && audibleTrack(p, tr0) && (c.volume > 0 || isAnimated(c, 'volume')) && (c.type === 'audio' || c.type === 'video');
     if (!wantV && !wantA) continue;
     let info = null;
     if (c.type === 'video' || c.type === 'audio' || c.type === 'image') info = await media.info(c.src);
@@ -343,23 +372,68 @@ export async function renderProject(o) {
     else inputs.push(['-i', file]);
 
     if (wantV) {
-      const mw = c.type === 'html' ? W : info.width;
-      const mh = c.type === 'html' ? H : info.height;
+      const html = c.type === 'html';
+      const mw = html ? W : info.width;
+      const mh = html ? H : info.height;
       const rc = still ? resolveAt(c, from) : c;
       const base = placement({ ...c, x: 0, y: 0, scale: 1 }, mw, mh, W, H);
       const animS = !still && isAnimated(c, 'scale');
       const animR = !still && isAnimated(c, 'rotation');
+      const animB = !still && isAnimated(c, 'blur');
       const rot = animR || Math.abs(rc.rotation || 0) > 1e-6;
       const U = sub('t', T0);
-      const ch = [];
+      // blur spreads past the clip's box (CSS blurs into transparency around it): pad for it
+      const blurTop = still ? (rc.blur || 0) : maxBlur(c);
+      const P = blurTop > 0.05 ? Math.ceil(blurTop * 3) + 2 : 0;
+      const cropOn = !!(c.cropT || c.cropR || c.cropB || c.cropL);
+      const mask = maskOf(c);
+      const key = keyOf(c);
+      const mode = c.blend && c.blend !== 'normal' && BLENDS.includes(c.blend) ? c.blend : null;
+      // The chain is built in segments so still images (vignette, mask) can join it.
+      let lab = `${k}:v`;
+      let ch = [];
+      let seg = 0;
+      const flush = () => {
+        const next = `v${k}s${seg++}`;
+        vf.push(`[${lab}]${ch.length ? ch.join(',') : 'null'}[${next}]`);
+        lab = next;
+        ch = [];
+      };
+      // multiply the clip by a still map (rgb by its rgb, alpha by its alpha), held over the clip window
+      const multiplyMap = async (name, w, h, rgba) => {
+        const file = path.join(await tmpDir(), `${name}${k}.pam`);
+        await fsp.writeFile(file, pam(w, h, rgba));
+        const km = inputs.length;
+        inputs.push(['-loop', '1', '-framerate', String(fps), '-t', f4(len + 1), '-i', file]);
+        flush();
+        const next = `v${k}s${seg++}`;
+        vf.push(`[${km}:v]format=gbrap,setpts=PTS-STARTPTS+${f4(off)}/TB[${name}${k}]`);
+        vf.push(`[${lab}]format=gbrap[${next}i];[${next}i][${name}${k}]blend=all_mode=multiply:shortest=1[${next}]`);
+        lab = next;
+      };
       if (c.type === 'video') {
         if (holdLast) ch.push('reverse', 'trim=end_frame=1');
         ch.push(sp !== 1 ? `setpts=(PTS-STARTPTS)/${sp.toFixed(6)}` : 'setpts=PTS-STARTPTS', `fps=${fps}`);
         if (headPad > 1e-4 || tailPad > 1e-4) ch.push(`tpad=start_mode=clone:start_duration=${f4(headPad)}:stop_mode=clone:stop_duration=${f4(tailPad + 2 / fps)}`);
       } else ch.push('setpts=PTS-STARTPTS');
       ch.push(`setpts=PTS+${f4(off)}/TB`, 'format=rgba');
-      // crop keeps the frame size: cut-away parts become transparent (like the CSS inset)
-      if (c.cropT || c.cropR || c.cropB || c.cropL) {
+      // chroma key: ffmpeg's colorkey + despill (the preview runs the same math in WebGL)
+      if (key && !html) {
+        const kf = [`colorkey=color=0x${key.color.slice(1)}:similarity=${Math.max(1e-5, key.similarity).toFixed(4)}:blend=${key.smooth.toFixed(4)}`];
+        const st = spillType(key.color);
+        if (st && key.spill > 0) kf.push(`despill=type=${st}:mix=0.5:expand=0:red=0:green=${st === 'green' ? -key.spill : 0}:blue=${st === 'blue' ? -key.spill : 0}:brightness=0`);
+        if (c.type === 'video') ch.push(...kf);
+        else {
+          // images may be transparent already: keep that (key alpha x source alpha)
+          flush();
+          const next = `v${k}s${seg++}`;
+          vf.push(`[${lab}]split[${next}a][${next}b];[${next}a]${kf.join(',')},format=gbrap[${next}k];[${next}b]lutrgb=r=255:g=255:b=255,format=gbrap[${next}w];[${next}k][${next}w]blend=all_mode=multiply[${next}]`);
+          lab = next;
+        }
+      }
+      // crop keeps the frame size: cut-away parts become transparent (like the CSS inset).
+      // With blur it happens after the blur instead (CSS: filter first, then clip-path).
+      if (cropOn && !P) {
         const cx = Math.round((mw * (c.cropL || 0)) / 100);
         const cy = Math.round((mh * (c.cropT || 0)) / 100);
         const cw = Math.max(1, Math.round(mw * (1 - ((c.cropL || 0) + (c.cropR || 0)) / 100)));
@@ -386,21 +460,79 @@ export async function renderProject(o) {
       } else {
         ch.push(...colorFilters(c, rc.opacity * (still ? fadeAt(c, from, tr) : 1)));
       }
+      // grade: white balance / hue / sepia matrix, then gamma, then the vignette
+      const M = colorMatrix(c);
+      if (M) {
+        const n = ['r', 'g', 'b'];
+        ch.push(`colorchannelmixer=${M.flatMap((row, i) => row.map((v, j) => `${n[i]}${n[j]}=${v.toFixed(5)}`)).join(':')}`);
+      }
+      if ((c.gamma ?? 1) !== 1) {
+        const e = `clip(255*pow(val/255,${(1 / c.gamma).toFixed(5)})+0.5,0,255)`;
+        ch.push(`lutrgb=r='${e}':g='${e}':b='${e}'`);
+      }
+      if ((c.vignette || 0) > 0) {
+        const v = vignetteMap(mw, mh, c.vignette);
+        const rgba = Buffer.alloc(mw * mh * 4, 255);
+        for (let i = 0; i < v.length; i++) { rgba[i * 4] = v[i]; rgba[i * 4 + 1] = v[i]; rgba[i * 4 + 2] = v[i]; }
+        await multiplyMap('vg', mw, mh, rgba);
+      }
+      // blur (premultiplied, into transparent padding), then crop and mask, on a box of bw x bh.
+      // Returns the frame size after it.
+      const blurCropMask = async (bw, bh) => {
+        if (P) {
+          ch.push(`pad=${bw + 2 * P}:${bh + 2 * P}:${P}:${P}:color=black@0`, 'premultiply=inplace=1');
+          if (animB) {
+            const n = Math.max(1, Math.round(len * fps));
+            const cmds = [];
+            let last = -1;
+            for (let i = 0; i <= n; i++) {
+              const v = Math.max(0.01, valueAt(c, 'blur', s + i / fps));
+              if (Math.abs(v - last) > 0.02 || i === 0) { cmds.push(`${f4(off + i / fps - (i === 0 ? 1 : 0.0005))} gblur@b${k} sigma ${v.toFixed(3)};`); last = v; }
+            }
+            const cmdFile = path.join(await tmpDir(), `blur${k}.cmd`);
+            await fsp.writeFile(cmdFile, cmds.join('\n'));
+            ch.push(`sendcmd=f=${cmdFile}`, `gblur@b${k}=sigma=${Math.max(0.01, valueAt(c, 'blur', s)).toFixed(3)}:steps=3`);
+          } else ch.push(`gblur=sigma=${Math.max(0.01, rc.blur || 0).toFixed(3)}:steps=3`);
+          ch.push('unpremultiply=inplace=1');
+          if (cropOn) {
+            const cx = P + Math.round((bw * (c.cropL || 0)) / 100);
+            const cy = P + Math.round((bh * (c.cropT || 0)) / 100);
+            const cw = Math.max(1, Math.round(bw * (1 - ((c.cropL || 0) + (c.cropR || 0)) / 100)));
+            const chh = Math.max(1, Math.round(bh * (1 - ((c.cropT || 0) + (c.cropB || 0)) / 100)));
+            ch.push(`crop=${cw}:${chh}:${cx}:${cy}`, `pad=${bw + 2 * P}:${bh + 2 * P}:${cx}:${cy}:color=black@0`);
+          }
+        }
+        if (mask) {
+          const m = maskMap(bw, bh, mask, P);
+          const rgba = Buffer.alloc(m.length * 4, 255);
+          for (let i = 0; i < m.length; i++) rgba[i * 4 + 3] = m[i];
+          await multiplyMap('mk', bw + 2 * P, bh + 2 * P, rgba);
+        }
+        return [bw + 2 * P, bh + 2 * P];
+      };
+      // A composition is blurred / masked at its own size (the CSS transform scales the
+      // result); footage at its size on the canvas (the preview sizes the element itself).
+      let fw = mw;
+      let fh = mh;
+      if (html && (P || mask)) [fw, fh] = await blurCropMask(mw, mh);
       const cm = 'out_color_matrix=bt709:out_range=tv';
-      if (!animS && !rot) {
-        ch.push(`scale=${even(base.w * rc.scale)}:${even(base.h * rc.scale)}:flags=lanczos:${cm}`);
+      const after = !html && (P || mask);
+      const smax = animS ? maxScale(c) : rc.scale;
+      const BW = even(fw * (base.w / mw) * smax);
+      const BH = even(fh * (base.h / mh) * smax);
+      if (!animS && !rot && !after && !mode) {
+        ch.push(`scale=${BW}:${BH}:flags=lanczos:${cm}`);
       } else {
-        const smax = animS ? maxScale(c) : rc.scale;
-        const BW = even(base.w * smax);
-        const BH = even(base.h * smax);
         ch.push(`scale=${BW}:${BH}:flags=lanczos`);
+        let [rw, rh] = [BW, BH];
+        if (after) [rw, rh] = await blurCropMask(BW, BH);
         if (rot) {
           let ow;
           let oh;
-          if (animR) { ow = even(Math.hypot(BW, BH)); oh = ow; } else {
+          if (animR) { ow = even(Math.hypot(rw, rh)); oh = ow; } else {
             const r = (rc.rotation * Math.PI) / 180;
-            ow = even(Math.abs(BW * Math.cos(r)) + Math.abs(BH * Math.sin(r)));
-            oh = even(Math.abs(BW * Math.sin(r)) + Math.abs(BH * Math.cos(r)));
+            ow = even(Math.abs(rw * Math.cos(r)) + Math.abs(rh * Math.sin(r)));
+            oh = even(Math.abs(rw * Math.sin(r)) + Math.abs(rh * Math.cos(r)));
           }
           const a = animR ? keyExpr(c, 'rotation', U, (v) => (v * Math.PI) / 180) : f4((rc.rotation * Math.PI) / 180);
           ch.push(`rotate=a='${a}':ow=${ow}:oh=${oh}:c=black@0`);
@@ -408,10 +540,11 @@ export async function renderProject(o) {
         if (animS) {
           const f = `(${keyExpr(c, 'scale', U)})/${f4(smax)}`;
           ch.push(`scale=w='max(2,2*trunc(iw*${f}/2))':h='max(2,2*trunc(ih*${f}/2))':eval=frame:flags=lanczos:${cm}`);
-        } else ch.push(`scale=${cm}`);
+        } else if (!mode) ch.push(`scale=${cm}`);
       }
-      ch.push('format=yuva420p');
-      vf.push(`[${k}:v]${ch.join(',')}[v${k}]`);
+      // blended clips stay RGB: they are mixed with the frame in RGB below
+      ch.push(mode ? 'format=rgba' : 'format=yuva420p');
+      vf.push(`[${lab}]${ch.join(',')}[v${k}]`);
       let px = isAnimated(c, 'x') && !still ? keyExpr(c, 'x', U) : f4(rc.x || 0);
       let py = isAnimated(c, 'y') && !still ? keyExpr(c, 'y', U) : f4(rc.y || 0);
       // push transitions slide the clip in / out: the same curve as the preview
@@ -423,13 +556,45 @@ export async function renderProject(o) {
         if (o.x !== '0') px = `(${px})+${o.x}`;
         if (o.y !== '0') py = `(${py})+${o.y}`;
       }
-      vf.push(`[${vlast}][v${k}]overlay=x='(main_w-overlay_w)/2+${px}':y='(main_h-overlay_h)/2+${py}':eof_action=pass:enable='between(t,${f4(off)},${f4(off + len)})'[o${k}]`);
+      const pos = `x='(main_w-overlay_w)/2+${px}':y='(main_h-overlay_h)/2+${py}'`;
+      const enable = `enable='between(t,${f4(off)},${f4(off + len)})'`;
+      if (!mode) {
+        vf.push(`[${vlast}][v${k}]overlay=${pos}:eof_action=pass:${enable}[o${k}]`);
+      } else {
+        // Blend modes (CSS mix-blend-mode math): put the clip on a transparent full
+        // frame, mix it with everything under it in RGB, and lay the result over the
+        // frame through the clip's own alpha: base*(1-a) + mix(base, clip)*a.
+        // Only the clip's own time window goes through the mix.
+        const toRgb = 'scale=in_color_matrix=bt709:in_range=tv,format=gbrp';
+        vf.push(`color=c=black@0:s=${W}x${H}:r=${fps}:d=${f4(len)},format=rgba,setpts=PTS+${f4(off)}/TB[t${k}]`);
+        vf.push(`[t${k}][v${k}]overlay=${pos}:eof_action=pass:format=rgb[l${k}]`);
+        vf.push(`[${vlast}]split[b${k}][bb${k}]`);
+        vf.push(`[b${k}]trim=start=${f4(off)}:end=${f4(off + len)},${toRgb}[bg${k}]`);
+        if (mode === 'add') {
+          // plus-lighter: base + premultiplied clip, clamped (opaque over the window)
+          vf.push(`[l${k}]premultiply=inplace=1,format=gbrp[lp${k}]`);
+          vf.push(`[bg${k}][lp${k}]blend=all_mode=addition,scale=${cm},format=yuva420p[bla${k}]`);
+        } else {
+          const [layerOnTop, how] = BLEND_FF[mode];
+          vf.push(`[l${k}]split[l${k}a][l${k}b]`);
+          vf.push(`[l${k}a]format=gbrp[lg${k}]`);
+          vf.push(`[l${k}b]alphaextract[la${k}]`);
+          vf.push(`${layerOnTop ? `[lg${k}][bg${k}]` : `[bg${k}][lg${k}]`}${how}[bl${k}]`);
+          vf.push(`[bl${k}][la${k}]alphamerge,scale=${cm},format=yuva420p[bla${k}]`);
+        }
+        vf.push(`[bb${k}][bla${k}]overlay=0:0:eof_action=pass:${enable}[o${k}]`);
+      }
       vlast = `o${k}`;
     }
     if (wantA) {
       const cutA = cut + headPad; // clip-local second where the audio starts
       const Ua = cutA >= 0 ? `(t+${f4(cutA)})` : `(t-${f4(-cutA)})`;
       const ch = ['asetpts=PTS-STARTPTS', 'aresample=48000', 'aformat=sample_fmts=fltp:channel_layouts=stereo', ...atempo(sp), 'asetpts=PTS-STARTPTS'];
+      if (c.pan) {
+        // equal-power balance, the same as the preview's StereoPannerNode
+        const g = panGains(c.pan);
+        ch.push(`pan=stereo|c0=${g.ll.toFixed(5)}*c0+${g.lr.toFixed(5)}*c1|c1=${g.rl.toFixed(5)}*c0+${g.rr.toFixed(5)}*c1`);
+      }
       const varying = isAnimated(c, 'volume') || c.fadeIn > 0 || c.fadeOut > 0 || tr?.xin > 0 || tr?.xout > 0;
       if (varying) {
         const g = [isAnimated(c, 'volume') ? `(${keyExpr(c, 'volume', Ua)})` : f4(c.volume)];
@@ -471,17 +636,27 @@ export async function renderProject(o) {
   // --- 4. encode ----------------------------------------------------------------
   const finalV = [];
   if (OW !== W || OH !== H) finalV.push(`scale=${OW}:${OH}:flags=lanczos`);
-  finalV.push(`format=${still ? 'rgb24' : CODECS[codec].pix}`);
-  if (!still) finalV.push('setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv');
-  const filters = [...vf, `[${vlast}]${finalV.join(',')}[vout]`];
-  if (!still) filters.push(...af, ...mix, `[amix]${loud || 'anull'}[aout]`);
+  const filters = [];
+  if (gif) {
+    // GIF: at most 25 fps, one palette for the whole clip (stats from the moving parts)
+    const gfps = Math.min(25, fps);
+    filters.push(...vf, `[${vlast}]${[...finalV, `fps=${gfps}`, 'scale=in_color_matrix=bt709:in_range=tv,format=rgb24'].join(',')},split[g1][g2]`,
+      '[g1]palettegen=stats_mode=diff[gp]', '[g2][gp]paletteuse=dither=sierra2_4a[vout]');
+  } else if (!audioOnly) {
+    finalV.push(`format=${still ? 'rgb24' : CODECS[codec].pix}`);
+    if (!still) finalV.push('setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv');
+    filters.push(...vf, `[${vlast}]${finalV.join(',')}[vout]`);
+  }
+  if (!still && !gif) filters.push(...af, ...mix, `[amix]${loud || 'anull'}[aout]`);
 
   await fsp.mkdir(path.dirname(out), { recursive: true });
   const ext = path.extname(out);
   const tmp = `${out.slice(0, -ext.length)}.partial${ext}`;
-  const args = ['-hide_banner', '-nostdin', '-y', '-v', 'error', ...inputArgs, '-filter_complex', filters.join(';'), '-map', '[vout]'];
-  if (still) args.push('-frames:v', '1', '-update', '1', tmp);
-  else args.push('-map', '[aout]', ...codecArgs(codec, { crf, preset, fps, audioBitrate: o.audioBitrate }), '-r', String(fps), '-t', f4(D), '-progress', 'pipe:1', '-nostats', tmp);
+  const args = ['-hide_banner', '-nostdin', '-y', '-v', 'error', ...inputArgs, '-filter_complex', filters.join(';')];
+  if (still) args.push('-map', '[vout]', '-frames:v', '1', '-update', '1', tmp);
+  else if (gif) args.push('-map', '[vout]', '-loop', '0', '-t', f4(D), '-progress', 'pipe:1', '-nostats', tmp);
+  else if (audioOnly) args.push('-map', '[aout]', ...AUDIO_ARGS[outExt], '-t', f4(D), '-progress', 'pipe:1', '-nostats', tmp);
+  else args.push('-map', '[vout]', '-map', '[aout]', ...codecArgs(codec, { crf, preset, fps, audioBitrate: o.audioBitrate }), '-r', String(fps), '-t', f4(D), '-progress', 'pipe:1', '-nostats', tmp);
 
   const base = wComp + wLoud;
   onProgress({ phase: 'encoding', progress: base, detail: '' });

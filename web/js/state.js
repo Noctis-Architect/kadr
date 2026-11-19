@@ -1,4 +1,4 @@
-import { normalizeProject, compactProject, projectDuration, clamp } from '/shared/model.js';
+import { normalizeProject, compactProject, projectDuration, clamp, withLinked } from '/shared/model.js';
 
 export const TOKEN = document.querySelector('meta[name="kadr-token"]')?.content || '';
 export const authHeaders = (extra = {}) => ({ 'x-kadr-token': TOKEN, ...extra });
@@ -17,6 +17,9 @@ export const S = {
   part: null, // { clip, key }: a part of a composition clip (parts.js)
   tool: 'select',
   snap: true,
+  linked: true, // selecting a clip selects the clips linked to it
+  rate: 1, // playback rate (J / L shuttle: -8..8)
+  binSel: null, // media path picked in the Media panel (insert / overwrite with , and .)
   pps: 80, // timeline pixels per second
   inPt: null,
   outPt: null,
@@ -166,11 +169,23 @@ export const snapFrame = (t) => Math.round(t * fps()) / fps();
 const playEnd = () => (S.outPt != null && S.t < S.outPt ? S.outPt : duration());
 const playStart = () => (S.inPt != null ? S.inPt : 0);
 
-export function play() {
-  if (S.playing || !S.project) return;
-  const end = playEnd();
-  if (S.t >= end - 1e-3) S.t = playStart();
-  if (!(end > S.t)) return;
+export function play(rate = 1) {
+  if (!S.project) return;
+  if (S.playing) {
+    // change speed / direction without stopping (J K L shuttle)
+    if (rate === S.rate) return;
+    t0 = S.t;
+    p0 = performance.now();
+    S.rate = rate;
+    emit('play');
+    return;
+  }
+  S.rate = rate;
+  if (rate > 0) {
+    const end = playEnd();
+    if (S.t >= end - 1e-3) S.t = playStart();
+    if (!(end > S.t)) return;
+  } else if (S.t <= 1e-3) return;
   S.playing = true;
   t0 = S.t;
   p0 = performance.now();
@@ -179,9 +194,23 @@ export function play() {
   raf = requestAnimationFrame(tick);
 }
 
+/** J / L: play backwards / forwards; pressing again doubles the speed (up to 8x). */
+export function shuttle(dir) {
+  if (!S.playing || Math.sign(S.rate) !== dir) return play(dir);
+  play(dir * Math.min(8, Math.abs(S.rate) * 2));
+}
+
 function tick() {
   if (!S.playing) return;
-  let t = t0 + (performance.now() - p0) / 1000;
+  let t = t0 + (S.rate * (performance.now() - p0)) / 1000;
+  if (S.rate < 0) {
+    const st = S.inPt != null && t0 > S.inPt ? S.inPt : 0;
+    if (t <= st) { S.t = st; pause(); return; }
+    S.t = t;
+    emit('time');
+    raf = requestAnimationFrame(tick);
+    return;
+  }
   const end = playEnd();
   if (t >= end) {
     if (S.loop && end > playStart()) {
@@ -202,6 +231,7 @@ function tick() {
 export function pause() {
   if (!S.playing) return;
   S.playing = false;
+  S.rate = 1;
   cancelAnimationFrame(raf);
   S.t = snapFrame(S.t);
   document.body.classList.remove('playing');
@@ -219,9 +249,10 @@ export function seek(t) {
   if (!S.playing) publishState();
 }
 
-export function select(ids, { add = false } = {}) {
+export function select(ids, { add = false, alone = false } = {}) {
   if (!add) S.sel.clear();
-  for (const id of ids) S.sel.add(id);
+  const all = S.linked && !alone && S.project ? withLinked(S.project, ids) : ids;
+  for (const id of all) S.sel.add(id);
   if (ids.length) S.marker = null;
   emit('select');
   publishState();
@@ -235,3 +266,14 @@ export function selectMarker(id) {
 }
 
 export function toast(text, err = false) { emit('toast', { text, err }); }
+
+/** Mark in / out (undefined leaves one as it is, null clears it). */
+export function setInOut(inPt, outPt) {
+  if (inPt !== undefined) S.inPt = inPt;
+  if (outPt !== undefined) S.outPt = outPt;
+  if (S.inPt != null && S.outPt != null && S.outPt <= S.inPt) {
+    if (inPt !== undefined) S.outPt = null; else S.inPt = null;
+  }
+  emit('inout');
+  publishState();
+}

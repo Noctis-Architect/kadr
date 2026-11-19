@@ -1,12 +1,34 @@
+import { stripSpec } from '/shared/model.js';
 import { S, on, emit, toast } from './state.js';
 import { $, h, svg, ICON, basename, fmtDur, upload, api } from './util.js';
-import { addClip } from './ops.js';
+import { addClip, insertMedia } from './ops.js';
 import { openCompEditor } from './compedit.js';
 import { ART, templateArt } from './art.js';
 import { openGallery, addTemplate } from './gallery.js';
+import { openMenu } from './menu.js';
 
-const root = $('#bin');
+const root = $('#binMedia');
 const uploads = new Map();
+let filter = '';
+
+/** Media picked in the panel (for , insert and . overwrite). */
+export function pickMedia(path) {
+  S.binSel = path;
+  for (const el of root.querySelectorAll('.item')) el.classList.toggle('on', el.dataset.path === path);
+}
+
+function itemMenu(e, m) {
+  e.preventDefault();
+  pickMedia(m.path);
+  openMenu(e.clientX, e.clientY, [
+    { label: 'Insert at playhead', kbd: ',', on: () => insertMedia(m.path) },
+    { label: 'Overwrite at playhead', kbd: '.', on: () => insertMedia(m.path, { overwrite: true }) },
+    { label: 'Add on a free track', on: () => addClip(m.path, S.t) },
+    '-',
+    m.kind === 'html' ? { label: 'Edit visually…', on: () => openCompEditor(m.path) } : null,
+    { label: 'Show file', on: () => api('/api/reveal', { path: m.path, select: true }).catch(() => {}) },
+  ]);
+}
 
 const GROUPS = [
   ['video', 'Footage'], ['audio', 'Audio'], ['image', 'Images'], ['html', 'Compositions'],
@@ -28,22 +50,50 @@ function item(m) {
   else if (m.kind === 'image') meta = `${m.width}×${m.height}`;
   else if (m.kind === 'html') meta = `${m.duration ? fmtDur(m.duration) : 'no duration'}${m.title ? ` · ${m.title}` : ''}`;
   const dir = m.path.includes('/') ? m.path.slice(0, m.path.lastIndexOf('/') + 1) : '';
+  // hover scrub: skim through a video's filmstrip with the mouse
+  if (m.kind === 'video' && !m.error && m.duration) {
+    const n = stripSpec(m.duration).count;
+    th.style.backgroundSize = `${n * 100}% 100%`;
+    th.addEventListener('pointermove', (e) => {
+      const r = th.getBoundingClientRect();
+      const i = Math.min(n - 1, Math.max(0, Math.floor(((e.clientX - r.left) / r.width) * n)));
+      th.style.backgroundPosition = `${n > 1 ? (i / (n - 1)) * 100 : 0}% 0`;
+      th.dataset.t = fmtDur((i / n) * m.duration);
+    });
+    th.addEventListener('pointerleave', () => { th.style.backgroundPosition = '0 0'; delete th.dataset.t; });
+    th.classList.add('scrub');
+  }
   return h('div.item', {
     draggable: true,
-    title: `${m.path}\nDouble-click: add at playhead · drag: drop on a track`,
+    'data-path': m.path,
+    class: `item${S.binSel === m.path ? ' on' : ''}`,
+    title: `${m.path}\nClick: pick (then , inserts · . overwrites at the playhead)\nDouble-click: add at playhead · drag: drop on a track · right-click: more`,
     on: {
+      click: () => pickMedia(m.path),
       dragstart: (e) => { e.dataTransfer.setData('text/kadr-src', m.path); e.dataTransfer.effectAllowed = 'copy'; },
       dblclick: () => addClip(m.path, S.t),
-      contextmenu: (e) => { e.preventDefault(); api('/api/reveal', { path: m.path, select: true }).catch(() => {}); },
+      contextmenu: (e) => itemMenu(e, m),
     },
   }, th, h('div.nm', {}, h('b', {}, basename(m.path)), h('span', { class: m.error ? 'bad' : '' }, dir && dir !== `${m.kind === 'html' ? 'comps' : 'media'}/` ? `${dir} · ${meta}` : meta)),
   m.kind === 'html' ? h('button.btn.ghost.sm.bin-edit', { title: 'Edit visually: text, images, timings', on: { click: (e) => { e.stopPropagation(); openCompEditor(m.path); }, dblclick: (e) => e.stopPropagation() } }, 'Edit') : null);
 }
 
 export function render() {
-  const list = [...S.media.values()];
-  const kids = [h('div.ph', {}, h('h3', {}, 'Media'), h('div.grow'),
-    h('button.btn.ghost.sm', { title: 'Import files into media/', on: { click: pick } }, '+ Import'))];
+  const all = [...S.media.values()];
+  const q = filter.trim().toLowerCase();
+  const list = q ? all.filter((m) => m.path.toLowerCase().includes(q)) : all;
+  const search = h('input.bin-search', { type: 'search', placeholder: 'Search media', value: filter, spellcheck: false });
+  search.addEventListener('input', () => {
+    filter = search.value;
+    render();
+    const s = root.querySelector('.bin-search');
+    s.focus();
+    s.setSelectionRange(s.value.length, s.value.length);
+  });
+  search.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') { filter = ''; render(); } });
+  const kids = [h('div.ph', {}, h('h3', {}, 'Media'), h('span.gh-n', {}, all.length), h('div.grow'),
+    h('button.btn.ghost.sm', { title: 'Import files into media/  Ctrl+I', on: { click: pick } }, svg(ICON.upload), 'Import')),
+  all.length > 4 ? h('div.bin-filter', {}, search) : null];
   for (const [name, u] of uploads) {
     kids.push(h('div.upload-row', {}, `Importing ${name}`, h('div.bar', {}, h('i', { style: { width: `${Math.round(u * 100)}%` } }))));
   }
@@ -68,13 +118,14 @@ export function render() {
         }, th, h('span', {}, t.title || basename(t.path)));
       }))));
   }
-  if (!list.length) {
+  if (!all.length) {
     kids.splice(1, 0, h('div.empty.bin-empty', {}, h('div.empty-art', { html: ART.media() }),
       h('b', {}, 'No media yet'),
       h('span', { html: 'Drop video, audio or images anywhere in the window, or put them in <code>media/</code>.' }),
       h('button.btn.sm', { on: { click: pick } }, svg(ICON.upload), 'Import files')));
   }
-  root.replaceChildren(...kids);
+  if (all.length && !list.length) kids.push(h('div.empty', {}, `Nothing matches "${filter}".`));
+  root.replaceChildren(...kids.filter(Boolean));
 }
 
 export function addText() {

@@ -19,6 +19,10 @@ export function openMenu(x, y, items, opts = {}) {
   const checks = items.some((it) => it && it.checked !== undefined);
   const list = items.filter((it, i, a) => it && !(it === '-' && (i === 0 || a[i - 1] === '-' || i === a.length - 1)));
   el = h(`div.menu${opts.cls ? `.${opts.cls}` : ''}`, { role: 'menu' }, ...list.map((it) => (it === '-' ? h('div.menu-sep')
+    : it.swatches ? h('div.menu-sw', {}, ...it.swatches.map((s) => h('button', {
+      class: s.color ? '' : 'none', title: s.title, style: s.color ? { background: s.color } : {},
+      on: { click: () => { closeMenu(); s.on?.(); } },
+    })))
     : h('button.menu-item', {
       class: `menu-item${it.danger ? ' danger' : ''}${it.sub ? ' sub' : ''}${checks ? ' checks' : ''}${it.checked ? ' checked' : ''}`,
       disabled: !!it.disabled,

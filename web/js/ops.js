@@ -1,6 +1,6 @@
 // Editing operations on the project (pure-ish: they take the project object).
-import { uid, clipEnd, trackKindFor, mediaKind, CLIP_DEFAULTS, valueAt, isAnimated, shiftKeys, r3 } from '/shared/model.js';
-import { S, commit, select, snapFrame, toast, seek } from './state.js';
+import { uid, clipEnd, trackKindFor, mediaKind, CLIP_DEFAULTS, valueAt, isAnimated, shiftKeys, r3, projectDuration } from '/shared/model.js';
+import { S, commit, select, snapFrame, toast, seek, setInOut } from './state.js';
 import { api } from './util.js';
 
 const EPS = 1e-4;
@@ -92,12 +92,27 @@ export function mediaDuration(c) {
   return S.media.get(c.src)?.duration || Infinity;
 }
 
-/** Split clip c at time t. Returns the new right-hand clip, or null. */
-export function splitClip(p, c, t) {
+/** A fresh link id for each old one (copies of linked clips stay linked among themselves). */
+export function linkMapper(p) {
+  const taken = new Set(p.clips.map((c) => c.link).filter(Boolean));
+  const m = new Map();
+  return (old) => {
+    if (!old) return undefined;
+    if (!m.has(old)) { const n = uid('L', taken); taken.add(n); m.set(old, n); }
+    return m.get(old);
+  };
+}
+
+/**
+ * Split clip c at time t. Returns the new right-hand clip, or null.
+ * relink: a linkMapper(), so the right halves of linked clips form their own group.
+ */
+export function splitClip(p, c, t, relink = null) {
   const f = 1 / p.fps;
   if (t <= c.start + f / 2 || t >= clipEnd(c) - f / 2) return null;
   const right = structuredClone(c);
   right.id = uid('c', ids(p));
+  if (relink && c.link) right.link = relink(c.link);
   right.start = t;
   right.in = c.in + (t - c.start) * (c.speed || 1);
   right.duration = clipEnd(c) - t;
@@ -137,17 +152,24 @@ export function clearRange(p, trackId, s, e, keep = new Set()) {
 }
 
 export function splitAtPlayhead() {
-  const t = snapFrame(S.t);
-  const targets = S.project.clips.filter((c) => t > c.start && t < clipEnd(c) && !isLocked(c) && (!S.sel.size || S.sel.has(c.id)));
+  splitClipsAt(snapFrame(S.t), S.sel.size ? [...S.sel] : null);
+}
+
+/** Split the clips under time t (only `only` ids if given, plus their linked partners). */
+export function splitClipsAt(t, only = null) {
+  const want = only ? new Set(only) : null;
+  if (want) for (const c of S.project.clips) if (c.link && S.project.clips.some((x) => want.has(x.id) && x.link === c.link)) want.add(c.id);
+  const targets = S.project.clips.filter((c) => t > c.start && t < clipEnd(c) && !isLocked(c) && (!want || want.has(c.id)));
   if (!targets.length) return toast('Nothing under the playhead to split');
-  let newIds = [];
+  const newIds = [];
   commit((p) => {
+    const relink = linkMapper(p);
     for (const c of targets) {
-      const r = splitClip(p, p.clips.find((x) => x.id === c.id), t);
+      const r = splitClip(p, p.clips.find((x) => x.id === c.id), t, relink);
       if (r) newIds.push(r.id);
     }
   });
-  if (S.sel.size && newIds.length) select(newIds);
+  if (only && newIds.length) select(newIds);
 }
 
 export function deleteSelected({ ripple = false } = {}) {
@@ -179,9 +201,11 @@ export function duplicateSelected() {
     const src = p.clips.filter((c) => S.sel.has(c.id));
     const end = Math.max(...src.map(clipEnd));
     const start = Math.min(...src.map((c) => c.start));
+    const relink = linkMapper(p);
     for (const c of src) {
       const d = structuredClone(c);
       d.id = uid('c', ids(p));
+      if (d.link) d.link = relink(c.link);
       d.start = c.start + (end - start);
       clearRange(p, d.track, d.start, clipEnd(d));
       p.clips.push(d);
@@ -197,12 +221,15 @@ export function detachAudio(c) {
   commit((pp) => {
     if (!a) { a = { id: nextTrackId(pp, 'audio'), kind: 'audio' }; pp.tracks.push(a); }
     const v = pp.clips.find((x) => x.id === c.id);
-    const clip = { ...CLIP_DEFAULTS, id: uid('c', ids(pp)), track: a.id, type: 'audio', src: v.src, start: v.start, duration: v.duration, in: v.in, speed: v.speed || 1, volume: v.volume || 1, fadeIn: v.fadeIn, fadeOut: v.fadeOut };
+    const clip = { ...CLIP_DEFAULTS, id: uid('c', ids(pp)), track: a.id, type: 'audio', src: v.src, start: v.start, duration: v.duration, in: v.in, speed: v.speed || 1, volume: v.volume || 1, pan: v.pan || 0, fadeIn: v.fadeIn, fadeOut: v.fadeOut };
+    // the two stay linked (move and trim together) until you unlink them
+    v.link ||= uid('L', new Set(pp.clips.map((x) => x.link).filter(Boolean)));
+    clip.link = v.link;
     clearRange(pp, a.id, clip.start, clipEnd(clip));
     pp.clips.push(clip);
     v.volume = 0;
   });
-  toast('Audio moved to its own clip; the video clip is muted');
+  toast('Audio moved to its own linked clip; the video clip is muted');
 }
 
 export function nextTrackId(p, kind) {
@@ -299,9 +326,11 @@ export function paste(t = S.t) {
   const at = snapFrame(t);
   const newIds = [];
   commit((p) => {
+    const relink = linkMapper(p);
     for (const c of clipboard) {
       const d = structuredClone(c);
       d.id = uid('c', ids(p));
+      if (d.link) d.link = relink(c.link);
       d.start = at + c.start;
       if (!p.tracks.some((x) => x.id === d.track && !x.locked)) d.track = p.tracks.find((x) => x.kind === trackKindFor(d.type) && !x.locked)?.id;
       if (!d.track) continue;
@@ -427,4 +456,152 @@ export async function reverseClip(c) {
 
 export function renameTrack(id, name) {
   commit(() => { const t = trackById(id); if (name) t.name = name; else delete t.name; });
+}
+
+// ---------- linking (Premiere's linked clips / grouping) ----------
+export function linkClips(idList) {
+  const list = idList.map(clipById).filter(Boolean);
+  if (list.length < 2) return toast('Select two or more clips to link');
+  const link = uid('L', new Set(S.project.clips.map((c) => c.link).filter(Boolean)));
+  commit((p) => { for (const c of p.clips) if (idList.includes(c.id)) c.link = link; });
+  toast(`Linked ${list.length} clips: they move, trim and delete together`);
+}
+export function unlinkClips(idList) {
+  const links = new Set(idList.map(clipById).filter(Boolean).map((c) => c.link).filter(Boolean));
+  if (!links.size) return toast('Those clips are not linked');
+  commit((p) => { for (const c of p.clips) if (links.has(c.link)) delete c.link; });
+  toast('Unlinked');
+}
+
+// ---------- three-point editing ----------
+/** Lift (leave a gap) or extract (close it) the marked in → out range on every unlocked track. */
+export function liftExtract(extract) {
+  if (S.inPt == null && S.outPt == null) return toast('Mark an in and an out point first (I and O)');
+  const a = S.inPt ?? 0;
+  const b = S.outPt ?? projectDuration(S.project);
+  if (!(b - a > 1e-4)) return;
+  commit((p) => {
+    for (const t of p.tracks) {
+      if (t.locked) continue;
+      clearRange(p, t.id, a, b);
+      if (extract) for (const c of p.clips) if (c.track === t.id && c.start >= b - EPS) c.start = r3(c.start - (b - a));
+    }
+    if (extract) {
+      p.markers = p.markers.filter((m) => m.t < a || m.t >= b);
+      for (const m of p.markers) if (m.t >= b) m.t = r3(m.t - (b - a));
+    }
+  });
+  setInOut(null, null);
+  seek(a);
+  toast(extract ? 'Extracted the in → out range and closed the gap' : 'Lifted the in → out range (the gap stays)');
+}
+
+/** Insert (push everything later) or overwrite a media file at the playhead. */
+export function insertMedia(src, { overwrite = false } = {}) {
+  const info = S.media.get(src) || S.templates.get(src);
+  const type = src.startsWith('@kadr/') ? 'html' : info?.kind || mediaKind(src);
+  if (!type) return toast(`Can't use ${src} as a clip`, true);
+  const kind = trackKindFor(type);
+  let d = 5;
+  if (type === 'video' || type === 'audio') d = info?.duration || 5;
+  if (type === 'html') d = info?.duration || 5;
+  const t = snapFrame(S.t);
+  const selTrack = [...S.sel].map(clipById).find((c) => c && trackKindFor(c.type) === kind && !isLocked(c))?.track;
+  const tid = selTrack || S.project.tracks.find((x) => x.kind === kind && !x.locked)?.id;
+  if (!tid) return toast(`No unlocked ${kind} track`);
+  const id = uid('c', ids(S.project));
+  commit((p) => {
+    if (!overwrite) {
+      const relink = linkMapper(p);
+      for (const tr of p.tracks) {
+        if (tr.locked) continue;
+        for (const c of [...p.clips]) if (c.track === tr.id && t > c.start + EPS && t < clipEnd(c) - EPS) splitClip(p, c, t, relink);
+        for (const c of p.clips) if (c.track === tr.id && c.start >= t - EPS) c.start = r3(c.start + d);
+      }
+      for (const m of p.markers) if (m.t >= t) m.t = r3(m.t + d);
+    }
+    clearRange(p, tid, t, t + d);
+    p.clips.push({ ...CLIP_DEFAULTS, id, track: tid, type, src, start: t, duration: d });
+  });
+  select([id]);
+  seek(t + d);
+  toast(overwrite ? 'Overwrote at the playhead' : 'Inserted at the playhead; later clips moved over');
+}
+
+/** Pack every clip on a track back to back from 0 (removes all gaps). */
+export function closeAllGaps(trackId) {
+  commit((p) => {
+    let at = 0;
+    for (const c of p.clips.filter((x) => x.track === trackId).sort((a, b) => a.start - b.start)) {
+      if (c.start > at + EPS) c.start = r3(at);
+      at = Math.max(at, clipEnd(c));
+    }
+  });
+}
+
+// ---------- analysis-driven edits ----------
+export async function stabilizeClip(c) {
+  if (c.type !== 'video') return toast('Stabilize works on video clips');
+  toast('Stabilizing… (runs in the background; a minute or two for long clips)');
+  let r;
+  try { r = await api('/api/stabilize', { src: c.src, in: c.in, span: c.duration * (c.speed || 1) }); } catch (e) { return toast(e.message, true); }
+  commit((p) => {
+    const x = p.clips.find((k) => k.id === c.id);
+    if (!x) return;
+    x.src = r.path;
+    x.in = 0;
+  });
+  toast('Stabilized. Undo brings the original back.');
+}
+
+/** Split a video clip wherever the shot changes (scene edit detection). */
+export async function detectScenes(c, threshold = 0.3) {
+  if (c.type !== 'video') return toast('Scene detection works on video clips');
+  toast('Looking for shot changes…');
+  let r;
+  try { r = await api('/api/scenes', { src: c.src, threshold }); } catch (e) { return toast(e.message, true); }
+  const sp = c.speed || 1;
+  const f = 1 / S.project.fps;
+  const times = (r.cuts || []).map((x) => snapFrame(c.start + (x.t - (c.in || 0)) / sp)).filter((t) => t > c.start + f && t < clipEnd(c) - f);
+  if (!times.length) return toast('No shot changes found in this clip');
+  // the clip and its linked partners (their pieces after each cut are on the same tracks)
+  const tracks = new Set(S.project.clips.filter((x) => x.id === c.id || (c.link && x.link === c.link)).map((x) => x.track));
+  commit((p) => {
+    const relink = linkMapper(p);
+    for (const t of times.sort((a, b) => a - b)) {
+      for (const x of [...p.clips]) if (tracks.has(x.track) && x.src === c.src && t > x.start + EPS && t < clipEnd(x) - EPS) splitClip(p, x, t, relink);
+    }
+  });
+  toast(`Cut at ${times.length} shot change${times.length > 1 ? 's' : ''}`);
+}
+
+/** Remove the silent parts of a clip and close the gaps (jump cuts), with a little padding. */
+export async function removeSilences(c, { noise = -35, min = 0.5, pad = 0.08 } = {}) {
+  if (c.type !== 'video' && c.type !== 'audio') return toast('Silence removal works on clips with sound');
+  toast('Finding the quiet parts…');
+  let r;
+  try { r = await api('/api/silence', { src: c.src, noise, min }); } catch (e) { return toast(e.message, true); }
+  const sp = c.speed || 1;
+  const s0 = c.start;
+  const e0 = clipEnd(c);
+  const ranges = (r.silences || [])
+    .map((x) => [s0 + (x.start + pad - (c.in || 0)) / sp, s0 + (x.end - pad - (c.in || 0)) / sp])
+    .map(([a, b]) => [snapFrame(Math.max(s0, a)), snapFrame(Math.min(e0, b))])
+    .filter(([a, b]) => b - a > 2 / S.project.fps);
+  if (!ranges.length) return toast('No silences long enough to cut');
+  const group = new Set(S.project.clips.filter((x) => x.id === c.id || (c.link && x.link === c.link)).map((x) => x.id));
+  const tracks = new Set([...group].map((id) => clipById(id).track));
+  let removed = 0;
+  commit((p) => {
+    // from the end backwards, so earlier times stay valid
+    for (const [a, b] of ranges.sort((x, y) => y[0] - x[0])) {
+      for (const tid of tracks) {
+        if (p.tracks.find((t) => t.id === tid)?.locked) continue;
+        clearRange(p, tid, a, b);
+        for (const x of p.clips) if (x.track === tid && x.start >= b - EPS) x.start = r3(x.start - (b - a));
+      }
+      removed += b - a;
+    }
+  });
+  toast(`Removed ${ranges.length} silent part${ranges.length > 1 ? 's' : ''} (${removed.toFixed(1)} s)`);
 }

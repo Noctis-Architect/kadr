@@ -12,9 +12,9 @@ import { readFields } from '../shared/lint.js';
  * Run a process. Resolves with stdout (string, or Buffer with binary:true).
  * nice: lower the child's CPU priority so background work never starves the UI.
  */
-export function run(cmd, args, { nice = 0, onStdout, signal, binary = false, stderr: wantStderr = false } = {}) {
+export function run(cmd, args, { nice = 0, onStdout, signal, binary = false, stderr: wantStderr = false, cwd } = {}) {
   return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], cwd });
     if (nice) {
       try { os.setPriority(p.pid, nice); } catch { /* not allowed: fine */ }
     }
@@ -51,6 +51,39 @@ export function limiter(n) {
     Promise.resolve().then(fn).then(res, rej).finally(() => { active--; next(); });
   };
   return (fn) => new Promise((res, rej) => { q.push({ fn, res, rej }); next(); });
+}
+
+let filterList = null;
+/** Whether this ffmpeg build has a filter (vidstab is optional in some builds). */
+export async function hasFilter(name) {
+  filterList ??= run('ffmpeg', ['-hide_banner', '-filters']).catch(() => '');
+  return new RegExp(`\\s${name}\\s`).test(await filterList);
+}
+
+/** Shot changes in a video: [{ t, score }] (seconds in the file). */
+export async function sceneCuts(abs, threshold = 0.3) {
+  const { stdout } = await run('ffmpeg', ['-hide_banner', '-v', 'error', '-i', abs, '-an', '-vf', `select='gt(scene,${threshold})',metadata=print:file=-`, '-f', 'null', '-'], { stderr: true, nice: 5 });
+  const cuts = [];
+  const re = /pts_time:([\d.]+)[\s\S]*?lavfi\.scene_score=([\d.]+)/g;
+  let m;
+  while ((m = re.exec(stdout))) cuts.push({ t: Math.round(Number(m[1]) * 1000) / 1000, score: Math.round(Number(m[2]) * 1000) / 1000 });
+  return cuts;
+}
+
+/** Quiet ranges in a file's sound: [{ start, end }] (seconds in the file). */
+export async function silences(abs, noise = -35, min = 0.4, duration = null) {
+  const { stderr } = await run('ffmpeg', ['-hide_banner', '-nostats', '-i', abs, '-vn', '-af', `silencedetect=n=${noise}dB:d=${min}`, '-f', 'null', '-'], { stderr: true, nice: 5 });
+  const out = [];
+  let cur = null;
+  for (const l of stderr.split('\n')) {
+    const s = l.match(/silence_start: (-?[\d.]+)/);
+    const e = l.match(/silence_end: ([\d.]+)/);
+    if (s) cur = { start: Math.max(0, Number(s[1])) };
+    if (e && cur) { cur.end = Number(e[1]); out.push(cur); cur = null; }
+  }
+  if (cur && duration) { cur.end = duration; out.push(cur); }
+  const r = (n) => Math.round(n * 1000) / 1000;
+  return out.map((x) => ({ start: r(x.start), end: r(x.end) }));
 }
 
 const PREVIEW_VCODECS = ['h264', 'vp8', 'vp9', 'av1'];
@@ -264,6 +297,76 @@ export class Media {
         await fsp.rm(tmpDir, { recursive: true, force: true });
       }
     });
+  }
+
+  /** Run a background media job with progress pills; `make(tmpDir)` writes the file. */
+  async job(label, out, make) {
+    if (fs.existsSync(out)) return;
+    await this.once(out, async () => {
+      this.emit({ type: 'job', label, state: 'running' });
+      const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'kadr-job-'));
+      try {
+        await fsp.mkdir(path.dirname(out), { recursive: true });
+        await make(tmpDir);
+        this.emit({ type: 'job', label, state: 'done' });
+        this.emit({ type: 'media' });
+      } catch (e) {
+        this.emit({ type: 'job', label, state: 'error', error: e.message });
+        throw e;
+      } finally {
+        await fsp.rm(tmpDir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  /**
+   * Steadied copy of [in, in + span) in media/stable/: libvidstab in two passes
+   * (motion analysis, then smoothing with a slight zoom to hide the edges), or
+   * ffmpeg's single-pass deshake where vidstab isn't built in.
+   */
+  async stabilize(rel, inT, span) {
+    const info = await this.info(rel);
+    if (info.kind !== 'video') throw new Error('stabilize needs a video');
+    inT = Math.max(0, Number(inT) || 0);
+    span = Math.min(Number(span) || 0, (info.duration || Infinity) - inT);
+    if (!(span > 0.05)) throw new Error('nothing to stabilize');
+    if (span > 1200) throw new Error('stabilize is limited to 20 minutes of source');
+    const base = path.basename(rel, path.extname(rel)).replace(/[^\w.-]+/g, '-');
+    const outRel = `media/stable/${base}-${inT.toFixed(2)}-${span.toFixed(2)}.mp4`;
+    const out = path.join(this.root, outRel);
+    await this.job(`stabilize ${path.basename(rel)}`, out, async (tmpDir) => {
+      const cut = ['-ss', inT.toFixed(4), '-t', span.toFixed(4), '-i', this.abs(rel)];
+      const enc = ['-c:v', 'libx264', '-preset', 'medium', '-crf', '14', '-pix_fmt', 'yuv420p', ...(info.hasAudio ? ['-c:a', 'aac', '-b:a', '256k'] : ['-an']), '-movflags', '+faststart'];
+      const tmp = `${out}.part.mp4`;
+      if (await hasFilter('vidstabdetect')) {
+        // cwd = tmpDir keeps the motion file path free of ':' and '\' (filter syntax)
+        await run('ffmpeg', ['-hide_banner', '-v', 'error', '-y', ...cut, '-an', '-vf', 'vidstabdetect=shakiness=6:accuracy=12:result=motion.trf', '-f', 'null', '-'], { nice: 8, cwd: tmpDir });
+        await run('ffmpeg', ['-hide_banner', '-v', 'error', '-y', ...cut, '-vf', 'vidstabtransform=input=motion.trf:smoothing=24:optzoom=1:interpol=bicubic,unsharp=5:5:0.5:3:3:0.25', ...enc, tmp], { nice: 8, cwd: tmpDir });
+      } else {
+        await run('ffmpeg', ['-hide_banner', '-v', 'error', '-y', ...cut, '-vf', 'deshake=rx=48:ry=48:edge=mirror', ...enc, tmp], { nice: 8 });
+      }
+      await fsp.rename(tmp, out);
+    });
+    return outRel;
+  }
+
+  /** A copy with less background noise (low cut + adaptive FFT denoiser) in media/clean/. The picture is kept as it is. */
+  async denoise(rel) {
+    const info = await this.info(rel);
+    if (!info.hasAudio) throw new Error('this file has no sound');
+    const video = info.kind === 'video';
+    const base = path.basename(rel, path.extname(rel)).replace(/[^\w.-]+/g, '-');
+    const outRel = `media/clean/${base}.${video ? 'mp4' : 'm4a'}`;
+    const out = path.join(this.root, outRel);
+    await this.job(`reduce noise ${path.basename(rel)}`, out, async () => {
+      const tmp = `${out}.part${path.extname(out)}`;
+      const vcopy = video && ['h264', 'hevc', 'av1'].includes(info.vcodec);
+      const v = !video ? ['-vn'] : vcopy ? ['-c:v', 'copy'] : ['-c:v', 'libx264', '-preset', 'medium', '-crf', '14', '-pix_fmt', 'yuv420p'];
+      await run('ffmpeg', ['-hide_banner', '-v', 'error', '-y', '-i', this.abs(rel), ...v,
+        '-af', 'highpass=f=70,afftdn=nr=14:nf=-35:tn=1', '-c:a', 'aac', '-b:a', '256k', '-movflags', '+faststart', tmp], { nice: 8 });
+      await fsp.rename(tmp, out);
+    });
+    return outRel;
   }
 
   proxyRel(info) { return `.kadr/proxies/${info.key}.mp4`; }

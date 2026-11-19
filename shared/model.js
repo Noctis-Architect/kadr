@@ -11,6 +11,7 @@ export const CLIP_DEFAULTS = {
   in: 0, speed: 1, x: 0, y: 0, scale: 1, opacity: 1, volume: 1, fadeIn: 0, fadeOut: 0, fit: 'contain',
   brightness: 1, contrast: 1, saturation: 1,
   rotation: 0, flipH: false, flipV: false, cropT: 0, cropR: 0, cropB: 0, cropL: 0, xfade: 0, xfadeType: 'dissolve',
+  gamma: 1, temperature: 0, tint: 0, hue: 0, sepia: 0, vignette: 0, blur: 0, blend: 'normal', pan: 0,
 };
 
 // How a clip with xfade > 0 takes over from the previous clip: a dissolve, or
@@ -19,13 +20,26 @@ export const XFADE_TYPES = ['dissolve', 'pushLeft', 'pushRight', 'pushUp', 'push
 
 // Properties that can carry keyframes: clip.keys = { x: [[t, value, ease?], ...] }
 // t is seconds from the clip start; ease shapes the move from this key to the next.
-export const ANIMATABLE = ['x', 'y', 'scale', 'rotation', 'opacity', 'volume'];
-export const EASES = ['ease', 'linear', 'in', 'out', 'hold'];
+export const ANIMATABLE = ['x', 'y', 'scale', 'rotation', 'opacity', 'volume', 'blur'];
+export const EASES = ['ease', 'linear', 'in', 'out', 'smooth', 'back', 'elastic', 'bounce', 'hold'];
+
+// How a picture mixes with what is under it (same math as CSS mix-blend-mode).
+export const BLENDS = ['normal', 'multiply', 'screen', 'overlay', 'softLight', 'hardLight', 'darken', 'lighten', 'colorDodge', 'colorBurn', 'add', 'difference', 'exclusion'];
+export const BLEND_CSS = {
+  normal: 'normal', multiply: 'multiply', screen: 'screen', overlay: 'overlay', softLight: 'soft-light', hardLight: 'hard-light',
+  darken: 'darken', lighten: 'lighten', colorDodge: 'color-dodge', colorBurn: 'color-burn', add: 'plus-lighter', difference: 'difference', exclusion: 'exclusion',
+};
+// Label colors for clips on the timeline, and marker colors (names; the UI picks the shades).
+export const LABEL_COLORS = ['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'violet', 'pink', 'brown', 'gray'];
+export const MASK_SHAPES = ['ellipse', 'rect'];
+export const MASK_DEFAULTS = { shape: 'ellipse', x: 50, y: 50, w: 60, h: 60, feather: 8, invert: false };
+export const KEY_DEFAULTS = { color: '#00ff00', similarity: 0.3, smooth: 0.08, spill: 0.6 };
 
 const CLIP_KEY_ORDER = [
   'id', 'track', 'type', 'src', 'start', 'duration', 'in', 'speed',
-  'fit', 'x', 'y', 'scale', 'rotation', 'flipH', 'flipV', 'opacity', 'volume', 'fadeIn', 'fadeOut', 'xfade', 'xfadeType',
-  'cropT', 'cropR', 'cropB', 'cropL', 'brightness', 'contrast', 'saturation', 'keys', 'props', 'label', 'disabled',
+  'fit', 'x', 'y', 'scale', 'rotation', 'flipH', 'flipV', 'opacity', 'blend', 'volume', 'pan', 'fadeIn', 'fadeOut', 'xfade', 'xfadeType',
+  'cropT', 'cropR', 'cropB', 'cropL', 'mask', 'brightness', 'contrast', 'saturation', 'gamma', 'temperature', 'tint', 'hue', 'sepia', 'vignette',
+  'blur', 'key', 'keys', 'props', 'label', 'labelColor', 'link', 'disabled',
 ];
 const TIME_KEYS = ['start', 'duration', 'in', 'fadeIn', 'fadeOut', 'xfade'];
 
@@ -124,6 +138,7 @@ export function compactProject(p) {
     for (const k of Object.keys(t)) if (!(k in o)) o[k] = t[k];
     if (!o.hidden) delete o.hidden;
     if (!o.muted) delete o.muted;
+    if (!o.solo) delete o.solo;
     if (!o.locked) delete o.locked;
     if (!o.name) delete o.name;
     return o;
@@ -144,13 +159,27 @@ export function compactProject(p) {
       for (const [k, v] of Object.entries(CLIP_DEFAULTS)) if (o[k] === v) delete o[k];
       for (const k of TIME_KEYS) if (typeof o[k] === 'number') o[k] = r3(o[k]);
       for (const k of ['x', 'y']) if (typeof o[k] === 'number') o[k] = Math.round(o[k] * 10) / 10;
-      for (const k of ['scale', 'opacity', 'volume', 'speed', 'brightness', 'contrast', 'saturation']) if (typeof o[k] === 'number') o[k] = r3(o[k]);
-      for (const k of ['rotation', 'cropT', 'cropR', 'cropB', 'cropL']) if (typeof o[k] === 'number') o[k] = Math.round(o[k] * 100) / 100;
+      for (const k of ['scale', 'opacity', 'volume', 'speed', 'brightness', 'contrast', 'saturation', 'gamma', 'temperature', 'tint', 'sepia', 'vignette', 'pan']) if (typeof o[k] === 'number') o[k] = r3(o[k]);
+      for (const k of ['rotation', 'cropT', 'cropR', 'cropB', 'cropL', 'hue', 'blur']) if (typeof o[k] === 'number') o[k] = Math.round(o[k] * 100) / 100;
+      if (o.mask && typeof o.mask === 'object') {
+        const m = {};
+        for (const [k, v] of Object.entries(o.mask)) if (v !== MASK_DEFAULTS[k] || k === 'shape') m[k] = typeof v === 'number' ? Math.round(v * 100) / 100 : v;
+        o.mask = m;
+      }
+      if (o.key && typeof o.key === 'object') {
+        const m = {};
+        for (const [k, v] of Object.entries(o.key)) if (v !== KEY_DEFAULTS[k] || k === 'color') m[k] = typeof v === 'number' ? r3(v) : v;
+        o.key = m;
+      }
+      if (!o.mask) delete o.mask;
+      if (!o.key) delete o.key;
+      if (!o.labelColor) delete o.labelColor;
+      if (!o.link) delete o.link;
       if (o.keys) {
         const keys = {};
         for (const [k, list] of Object.entries(o.keys)) {
           if (!Array.isArray(list) || !list.length) continue;
-          const dig = k === 'x' || k === 'y' || k === 'rotation' ? 10 : 1000;
+          const dig = k === 'x' || k === 'y' || k === 'rotation' || k === 'blur' ? 10 : 1000;
           keys[k] = list.map((x) => { const v = [r3(x[0]), Math.round(x[1] * dig) / dig]; if (x[2] && x[2] !== 'ease') v.push(x[2]); return v; });
         }
         if (Object.keys(keys).length) o.keys = keys;
@@ -215,6 +244,7 @@ export function validateProject(raw) {
     if (!t || !t.id) return errors.push(`tracks[${i}] needs an "id"`);
     if (tracks.has(t.id)) errors.push(`duplicate track id "${t.id}"`);
     if (!['video', 'audio'].includes(t.kind)) errors.push(`track ${t.id}: "kind" must be "video" or "audio"`);
+    for (const k of ['hidden', 'muted', 'solo', 'locked']) if (t[k] != null && typeof t[k] !== 'boolean') errors.push(`track ${t.id}: "${k}" must be true or false`);
     tracks.set(t.id, t);
   });
 
@@ -271,6 +301,35 @@ export function validateProject(raw) {
         }
       }
     }
+    if (c.gamma != null && !(num(c.gamma) && c.gamma >= 0.1 && c.gamma <= 10)) errors.push(`${at}: "gamma" must be 0.1..10 (1 = unchanged, above 1 brightens the midtones)`);
+    for (const k of ['temperature', 'tint', 'pan']) if (c[k] != null && !(num(c[k]) && c[k] >= -1 && c[k] <= 1)) errors.push(`${at}: "${k}" must be -1..1 (0 = unchanged)`);
+    if (c.hue != null && !(num(c.hue) && c.hue >= -360 && c.hue <= 360)) errors.push(`${at}: "hue" must be -360..360 (degrees)`);
+    for (const k of ['sepia', 'vignette']) if (c[k] != null && !(num(c[k]) && c[k] >= 0 && c[k] <= 1)) errors.push(`${at}: "${k}" must be 0..1`);
+    if (c.blur != null && !(num(c.blur) && c.blur >= 0 && c.blur <= 200)) errors.push(`${at}: "blur" must be 0..200 (pixels)`);
+    if (c.blend != null && !BLENDS.includes(c.blend)) errors.push(`${at}: "blend" must be one of ${BLENDS.join(', ')}`);
+    if (c.labelColor != null && !LABEL_COLORS.includes(c.labelColor)) errors.push(`${at}: "labelColor" must be one of ${LABEL_COLORS.join(', ')}`);
+    if (c.link != null && typeof c.link !== 'string') errors.push(`${at}: "link" must be a string (clips with the same link move together)`);
+    if (c.mask != null) {
+      const m = c.mask;
+      if (typeof m !== 'object' || Array.isArray(m)) errors.push(`${at}: "mask" must be an object like {"shape":"ellipse","x":50,"y":50,"w":60,"h":60,"feather":8}`);
+      else {
+        if (m.shape != null && !MASK_SHAPES.includes(m.shape)) errors.push(`${at}: mask.shape must be ${MASK_SHAPES.join(' or ')}`);
+        for (const k of ['x', 'y']) if (m[k] != null && !num(m[k])) errors.push(`${at}: mask.${k} must be a number (percent of the clip, 50 = centre)`);
+        for (const k of ['w', 'h']) if (m[k] != null && !(num(m[k]) && m[k] > 0)) errors.push(`${at}: mask.${k} must be > 0 (percent of the clip)`);
+        if (m.feather != null && !(num(m.feather) && m.feather >= 0 && m.feather <= 100)) errors.push(`${at}: mask.feather must be 0..100 (percent of the clip's shorter side)`);
+        if (m.invert != null && typeof m.invert !== 'boolean') errors.push(`${at}: mask.invert must be true or false`);
+      }
+    }
+    if (c.key != null) {
+      const k = c.key;
+      if (typeof k !== 'object' || Array.isArray(k)) errors.push(`${at}: "key" must be an object like {"color":"#00ff00","similarity":0.3,"smooth":0.08,"spill":0.6}`);
+      else {
+        if (k.color != null && !/^#[0-9a-f]{6}$/i.test(k.color)) errors.push(`${at}: key.color must be a #rrggbb color`);
+        if (k.similarity != null && !(num(k.similarity) && k.similarity > 0 && k.similarity <= 1)) errors.push(`${at}: key.similarity must be 0..1`);
+        for (const x of ['smooth', 'spill']) if (k[x] != null && !(num(k[x]) && k[x] >= 0 && k[x] <= 1)) errors.push(`${at}: key.${x} must be 0..1`);
+      }
+      if (c.type === 'audio' || c.type === 'html') warnings.push(`${at}: chroma key works on video and image clips`);
+    }
     if (c.type === 'audio' && ['brightness', 'contrast', 'saturation'].some((k) => c[k] != null && c[k] !== 1)) warnings.push(`${at}: audio clips ignore color settings`);
     if (c.fit != null && !FITS.includes(c.fit)) errors.push(`${at}: "fit" must be one of ${FITS.join(', ')}`);
     if (c.props != null && (typeof c.props !== 'object' || Array.isArray(c.props))) errors.push(`${at}: "props" must be an object`);
@@ -300,6 +359,7 @@ export function validateProject(raw) {
   }
   (raw.markers || []).forEach((m, i) => {
     if (!num(m?.t) || m.t < 0) errors.push(`markers[${i}]: "t" must be a number >= 0`);
+    if (m?.color != null && !LABEL_COLORS.includes(m.color)) errors.push(`markers[${i}]: "color" must be one of ${LABEL_COLORS.join(', ')}`);
   });
   return { errors, warnings };
 }
@@ -437,12 +497,24 @@ export function clipWindow(c, tr) {
 }
 
 // ---------- keyframes ----------
+// Easing curves. render.js has the same curves as ffmpeg expressions (EASE_EXPR): keep them in step.
 export function ease(name, p) {
   switch (name) {
     case 'linear': return p;
     case 'in': return p * p * p;
     case 'out': return 1 - (1 - p) ** 3;
     case 'hold': return 0;
+    case 'smooth': return (1 - Math.cos(Math.PI * p)) / 2;
+    case 'back': return 1 + 2.70158 * (p - 1) ** 3 + 1.70158 * (p - 1) ** 2;
+    case 'elastic': return p <= 0 ? 0 : p >= 1 ? 1 : 2 ** (-10 * p) * Math.sin((10 * p - 0.75) * 2.0943951) + 1;
+    case 'bounce': {
+      const n = 7.5625;
+      if (p < 1 / 2.75) return n * p * p;
+      if (p < 2 / 2.75) { const q = p - 1.5 / 2.75; return n * q * q + 0.75; }
+      if (p < 2.5 / 2.75) { const q = p - 2.25 / 2.75; return n * q * q + 0.9375; }
+      const q = p - 2.625 / 2.75;
+      return n * q * q + 0.984375;
+    }
     default: return p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2;
   }
 }
@@ -490,6 +562,154 @@ export function maxScale(c) {
 export function cssCrop(c) {
   if (!(c.cropT || c.cropR || c.cropB || c.cropL)) return '';
   return `inset(${c.cropT || 0}% ${c.cropR || 0}% ${c.cropB || 0}% ${c.cropL || 0}%)`;
+}
+
+// ---------- color grading, vignette, masks, keying, pan ----------
+// Order of the picture effects, the same in the preview (CSS + one SVG filter)
+// and the export (ffmpeg): chroma key → brightness/contrast → saturation →
+// colorMatrix (white balance, hue, sepia) → gamma → vignette → blur → crop →
+// mask → opacity → blend mode.
+const mul3 = (a, b) => a.map((row) => [0, 1, 2].map((j) => row[0] * b[0][j] + row[1] * b[1][j] + row[2] * b[2][j]));
+
+/**
+ * 3x3 matrix (rows r, g, b; 0..1 values in, 0..1 out) for temperature, tint, hue
+ * and sepia, or null when they are all neutral. Hue and sepia are the CSS
+ * hue-rotate() / sepia() matrices.
+ */
+export function colorMatrix(c) {
+  const T = c.temperature || 0;
+  const G = c.tint || 0;
+  const hue = c.hue || 0;
+  const sp = c.sepia || 0;
+  if (!T && !G && !hue && !sp) return null;
+  // white balance as channel gains, normalised so a mid grey keeps its brightness
+  let r = 1 + 0.3 * T;
+  let g = 1 - 0.25 * G;
+  let b = 1 - 0.3 * T;
+  const k = 1 / (0.2126 * r + 0.7152 * g + 0.0722 * b);
+  r *= k; g *= k; b *= k;
+  let m = [[r, 0, 0], [0, g, 0], [0, 0, b]];
+  if (hue) {
+    const a = (hue * Math.PI) / 180;
+    const cs = Math.cos(a);
+    const sn = Math.sin(a);
+    m = mul3([
+      [0.213 + cs * 0.787 - sn * 0.213, 0.715 - cs * 0.715 - sn * 0.715, 0.072 - cs * 0.072 + sn * 0.928],
+      [0.213 - cs * 0.213 + sn * 0.143, 0.715 + cs * 0.285 + sn * 0.140, 0.072 - cs * 0.072 - sn * 0.283],
+      [0.213 - cs * 0.213 - sn * 0.787, 0.715 - cs * 0.715 + sn * 0.715, 0.072 + cs * 0.928 + sn * 0.072],
+    ], m);
+  }
+  if (sp) {
+    const q = 1 - sp;
+    m = mul3([
+      [0.393 + 0.607 * q, 0.769 - 0.769 * q, 0.189 - 0.189 * q],
+      [0.349 - 0.349 * q, 0.686 + 0.314 * q, 0.168 - 0.168 * q],
+      [0.272 - 0.272 * q, 0.534 - 0.534 * q, 0.131 + 0.869 * q],
+    ], m);
+  }
+  return m;
+}
+
+/** True when the clip needs the extra color stage (matrix, gamma or vignette). */
+export const hasGrade = (c) => !!colorMatrix(c) || (c.gamma ?? 1) !== 1 || (c.vignette || 0) > 0;
+
+const smooth01 = (t) => t * t * (3 - 2 * t);
+
+/**
+ * Vignette as a multiplier map, 0..255 per pixel (255 = untouched), w x h.
+ * Depends only on the position in the frame, so any resolution gives the same look.
+ */
+export function vignetteMap(w, h, amount) {
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const ny = ((y + 0.5) / h) * 2 - 1;
+    for (let x = 0; x < w; x++) {
+      const nx = ((x + 0.5) / w) * 2 - 1;
+      const t = clamp((Math.sqrt(nx * nx + ny * ny) / Math.SQRT2 - 0.45) / 0.55, 0, 1);
+      out[y * w + x] = Math.round(255 * (1 - amount * smooth01(t)));
+    }
+  }
+  return out;
+}
+
+export const maskOf = (c) => (c.mask && typeof c.mask === 'object' ? { ...MASK_DEFAULTS, ...c.mask } : null);
+
+/**
+ * Alpha of a clip mask (0..255) for a clip box of w x h px, inside a frame padded
+ * by `pad` px on every side (the padding is 0: a mask also clips blur overflow).
+ * Position and size are percent of the box; feather is percent of its shorter side.
+ */
+export function maskMap(w, h, mask, pad = 0) {
+  const m = { ...MASK_DEFAULTS, ...mask };
+  const FW = w + 2 * pad;
+  const out = new Uint8Array(FW * (h + 2 * pad));
+  const cx = (m.x / 100) * w;
+  const cy = (m.y / 100) * h;
+  const rx = Math.max(0.5, (m.w / 200) * w);
+  const ry = Math.max(0.5, (m.h / 200) * h);
+  const f = (m.feather / 100) * Math.min(w, h);
+  const soft = Math.max(1, f);
+  const rmin = Math.min(rx, ry);
+  for (let y = 0; y < h; y++) {
+    const py = y + 0.5 - cy;
+    for (let x = 0; x < w; x++) {
+      const px = x + 0.5 - cx;
+      let d;
+      if (m.shape === 'rect') {
+        const dx = Math.abs(px) - rx;
+        const dy = Math.abs(py) - ry;
+        d = Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0);
+      } else d = (Math.hypot(px / rx, py / ry) - 1) * rmin;
+      let t = clamp(0.5 - d / soft, 0, 1);
+      if (f > 1) t = smooth01(t);
+      if (m.invert) t = 1 - t;
+      out[(y + pad) * FW + x + pad] = Math.round(t * 255);
+    }
+  }
+  return out;
+}
+
+export const keyOf = (c) => (c.key && typeof c.key === 'object' ? { ...KEY_DEFAULTS, ...c.key } : null);
+
+/** Which channel a key color spills into: 'green', 'blue' or null (no despill). */
+export function spillType(hex) {
+  const n = parseInt(String(hex).slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  if (g >= r && g >= b && g > 64) return 'green';
+  if (b > r && b > g && b > 64) return 'blue';
+  return null;
+}
+
+/**
+ * Stereo pan as a 2x2 mix (equal power, like the Web Audio StereoPannerNode on a
+ * stereo input): outL = ll*L + lr*R, outR = rl*L + rr*R.
+ */
+export function panGains(pan) {
+  const p = clamp(pan || 0, -1, 1);
+  if (p <= 0) { const x = ((p + 1) * Math.PI) / 2; return { ll: 1, lr: Math.cos(x), rl: 0, rr: Math.sin(x) }; }
+  const x = (p * Math.PI) / 2;
+  return { ll: Math.cos(x), lr: 0, rl: Math.sin(x), rr: 1 };
+}
+
+/** Largest blur the clip reaches (export pads the frame for it once). */
+export function maxBlur(c) {
+  return Math.max(c.blur || 0, ...(c.keys?.blur || []).map((x) => x[1]));
+}
+
+/** ids plus the ids of every clip linked to them (same `link` value). */
+export function withLinked(p, ids) {
+  const out = new Set(ids);
+  const links = new Set(p.clips.filter((c) => out.has(c.id) && c.link).map((c) => c.link));
+  if (links.size) for (const c of p.clips) if (c.link && links.has(c.link)) out.add(c.id);
+  return out;
+}
+
+/** Tracks whose sound plays: when any track is soloed, only soloed tracks. */
+export function audibleTrack(p, t) {
+  if (!t || t.muted) return false;
+  return !(p.tracks || []).some((x) => x.solo) || !!t.solo;
 }
 
 const pad = (n) => String(n).padStart(2, '0');

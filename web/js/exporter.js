@@ -12,8 +12,11 @@ const PRESETS = {
   master: { title: 'Master', note: 'ProRes 422 HQ · 10-bit .mov', codec: 'prores', ext: 'mov', crf: 17, preset: 'medium', loudness: null, motionBlur: 8 },
   small: { title: 'Small', note: 'H.265 · half the size', codec: 'h265', ext: 'mp4', crf: 20, preset: 'medium', loudness: -14, motionBlur: 0 },
   draft: { title: 'Draft', note: 'fast, for review', codec: 'h264', ext: 'mp4', crf: 26, preset: 'veryfast', loudness: null, motionBlur: 0 },
+  gif: { title: 'GIF', note: 'animated, no sound, 25 fps max', codec: 'gif', ext: 'gif', crf: 18, preset: 'medium', loudness: null, motionBlur: 0, size: 480, noAudio: true },
+  audio: { title: 'Audio only', note: 'WAV 24-bit · the mix', codec: 'audio', ext: 'wav', crf: 18, preset: 'medium', loudness: null, motionBlur: 0, noVideo: true },
+  mp3: { title: 'MP3', note: 'the mix, 320 kbps · -14 LUFS', codec: 'audio', ext: 'mp3', crf: 18, preset: 'medium', loudness: -14, motionBlur: 0, noVideo: true },
 };
-const SIZES = [['project', 'Project'], [720, '720p'], [1080, '1080p'], [1440, '1440p'], [2160, '4K']];
+const SIZES = [['project', 'Project'], [480, '480p'], [720, '720p'], [1080, '1080p'], [1440, '1440p'], [2160, '4K']];
 
 function sizeFor(target) {
   const { width: W, height: H } = S.project;
@@ -31,10 +34,11 @@ export function openExport() {
   const st = { name: (p.name || 'export').replace(/[^\w.-]+/g, '_'), preset: PRESETS[saved.preset] ? saved.preset : 'web', size: saved.size ?? 'project', range: hasRange ? 'range' : 'all', loudness: undefined, motionBlur: undefined };
   const cfg = () => ({ ...PRESETS[st.preset], ...(st.loudness !== undefined ? { loudness: st.loudness } : {}), ...(st.motionBlur !== undefined ? { motionBlur: st.motionBlur } : {}) });
 
-  const presetBtns = Object.entries(PRESETS).map(([k, v]) => h('button.preset', { on: { click: () => { st.preset = k; st.loudness = undefined; st.motionBlur = undefined; paintForm(); } } }, h('b', {}, v.title), h('span', {}, v.note)));
+  const presetBtns = Object.entries(PRESETS).map(([k, v]) => h('button.preset', { on: { click: () => { st.preset = k; st.loudness = undefined; st.motionBlur = undefined; if (v.size) st.size = v.size; paintForm(); } } }, h('b', {}, v.title), h('span', {}, v.note)));
   const seg = (opts, get, set) => {
     const btns = opts.map(([v, t, dis]) => h('button', { disabled: !!dis, on: { click: () => { set(v); paintForm(); } } }, t));
-    return { el: h('div.seg-pick', {}, ...btns), paint: () => btns.forEach((b, i) => b.classList.toggle('on', String(get()) === String(opts[i][0]))) };
+    const wrap = h('div.seg-pick', {}, ...btns);
+    return { el: wrap, paint: () => btns.forEach((b, i) => b.classList.toggle('on', String(get()) === String(opts[i][0]))), btns };
   };
   const sizeSeg = seg(SIZES, () => st.size, (v) => { st.size = v; });
   const loudSeg = seg([[null, 'Off'], [-14, '-14 web'], [-16, '-16 podcast'], [-23, '-23 TV']], () => cfg().loudness, (v) => { st.loudness = v; });
@@ -52,10 +56,15 @@ export function openExport() {
     presetBtns.forEach((b, i) => b.classList.toggle('on', Object.keys(PRESETS)[i] === st.preset));
     for (const s of [sizeSeg, loudSeg, mbSeg, rangeSeg]) s.paint();
     const c = cfg();
+    // options that don't apply to this kind of file are switched off
+    for (const b of sizeSeg.btns) b.disabled = !!c.noVideo;
+    for (const b of mbSeg.btns) b.disabled = !!c.noVideo;
+    for (const b of loudSeg.btns) b.disabled = !!c.noAudio;
     const a = st.range === 'range' ? S.inPt ?? 0 : 0;
     const b = st.range === 'range' ? S.outPt ?? duration() : duration();
     const sz = sizeFor(st.size) || { width: p.width, height: p.height };
-    sum.textContent = `${sz.width}×${sz.height} · ${p.fps} fps · ${tc(Math.max(0, b - a), p.fps)} → renders/${st.name || 'export'}.${c.ext}`;
+    const what = c.noVideo ? 'sound only' : `${sz.width}×${sz.height} · ${c.codec === 'gif' ? Math.min(25, p.fps) : p.fps} fps`;
+    sum.textContent = `${what} · ${tc(Math.max(0, b - a), p.fps)} → renders/${st.name || 'export'}.${c.ext}`;
   }
 
   const modal = h('div.modal', { on: { pointerdown: (e) => e.stopPropagation() } },
@@ -78,7 +87,7 @@ export function openExport() {
   async function start() {
     const c = cfg();
     try { localStorage.setItem('kadr.export', JSON.stringify({ preset: st.preset, size: st.size })); } catch { /* ignore */ }
-    const body = { out: `${st.name || 'export'}.${c.ext}`, codec: c.codec, crf: c.crf, preset: c.preset, loudness: c.loudness, motionBlur: c.motionBlur, ...(sizeFor(st.size) || {}) };
+    const body = { out: `${st.name || 'export'}.${c.ext}`, codec: c.codec === 'gif' || c.codec === 'audio' ? undefined : c.codec, crf: c.crf, preset: c.preset, loudness: c.noAudio ? null : c.loudness, motionBlur: c.noVideo ? 0 : c.motionBlur, ...(c.noVideo ? {} : sizeFor(st.size) || {}) };
     if (st.range === 'range') { body.from = S.inPt ?? 0; body.to = S.outPt ?? duration(); }
     try {
       job = { state: 'running', progress: 0, phase: 'starting' };

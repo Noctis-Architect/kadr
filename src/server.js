@@ -14,7 +14,7 @@ import { searchStock, downloadStock } from './stock.js';
 import { readSite } from './site.js';
 import { connectStatus, setConnected, manualSnippet } from './connect.js';
 import { loadSettings, saveSettings, publicSettings, mergeSettings, keyFor, testKey } from './settings.js';
-import { probe } from './media.js';
+import { probe, sceneCuts, silences } from './media.js';
 import { findRoot } from './project.js';
 import { initProject } from './init.js';
 import { listRecent, touchRecent, forgetRecent, recentPaths, thumbFor } from './recent.js';
@@ -238,7 +238,7 @@ export async function startServer({ root: startRoot, port = 4310, host = '127.0.
     if (job?.state === 'running') throw Object.assign(new Error('an export is already running'), { status: 409 });
     const raw = JSON.parse(await readProjectText(root));
     const name = safeName(body.out || `${raw.name || 'export'}.mp4`);
-    const out = path.join(root, 'renders', /\.(mp4|webm|mov|mkv)$/i.test(name) ? name : `${name}.mp4`);
+    const out = path.join(root, 'renders', /\.(mp4|webm|mov|mkv|gif|wav|mp3|m4a|flac)$/i.test(name) ? name : `${name}.mp4`);
     const ac = new AbortController();
     job = { id: Date.now().toString(36), state: 'running', progress: 0, phase: 'starting', out: path.relative(root, out), ac, started: Date.now() };
     const pub = () => broadcast({ type: 'export', id: job.id, state: job.state, progress: job.progress, phase: job.phase, detail: job.detail, out: job.out, error: job.error, logs: job.logs, elapsed: Date.now() - job.started });
@@ -449,6 +449,26 @@ export async function startServer({ root: startRoot, port = 4310, host = '127.0.
     if (p === '/api/reverse' && m === 'POST') {
       const body = JSON.parse(await readBody(req));
       return json(res, 200, { path: await media.reverse(String(body.src), body.in, body.span) });
+    }
+    if (p === '/api/stabilize' && m === 'POST') {
+      const body = JSON.parse(await readBody(req));
+      return json(res, 200, { path: await media.stabilize(String(body.src), body.in, body.span) });
+    }
+    if (p === '/api/denoise' && m === 'POST') {
+      const body = JSON.parse(await readBody(req));
+      return json(res, 200, { path: await media.denoise(String(body.src)) });
+    }
+    if (p === '/api/scenes' && m === 'POST') {
+      const body = JSON.parse(await readBody(req));
+      const th = Math.min(0.9, Math.max(0.05, Number(body.threshold) || 0.3));
+      return json(res, 200, { cuts: await sceneCuts(media.abs(String(body.src)), th) });
+    }
+    if (p === '/api/silence' && m === 'POST') {
+      const body = JSON.parse(await readBody(req));
+      const info = await media.info(String(body.src));
+      const noise = Math.min(-10, Math.max(-90, Number(body.noise ?? -35)));
+      const min = Math.min(10, Math.max(0.1, Number(body.min ?? 0.5)));
+      return json(res, 200, { silences: await silences(media.abs(String(body.src)), noise, min, info.duration) });
     }
     if (p === '/api/reveal' && m === 'POST') {
       const body = JSON.parse(await readBody(req));

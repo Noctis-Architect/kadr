@@ -90,7 +90,7 @@ All times are **seconds** (floats, rounded to ms on save). Positions are **pixel
 ### Tracks
 - `kind`: `"video"` (holds `video`, `image`, `html` clips) or `"audio"` (holds `audio` clips).
 - **Layering**: video tracks later in the array draw **on top**. `V1` is the bottom layer.
-- Optional `hidden: true` (no picture), `muted: true` (no sound), `locked: true`
+- Optional `hidden: true` (no picture), `muted: true` (no sound), `solo: true` (only soloed tracks are heard), `locked: true`
   (the user locked it: **do not change clips on a locked track** unless asked), `name`.
 - To layer things over each other, put them on different tracks. Clips on the
   same track should not overlap (validate warns you if they do).
@@ -119,6 +119,17 @@ All times are **seconds** (floats, rounded to ms on save). Positions are **pixel
 | `xfadeType` | `"dissolve"` | how that transition looks: `dissolve`, or `pushLeft` / `pushRight` / `pushUp` / `pushDown` (both pictures slide; the new one comes from that side) |
 | `keys` | | keyframes, see below |
 | `brightness`, `contrast`, `saturation` | `1` | color, 0..4 (1 = unchanged; same math as CSS `brightness()` / `contrast()` / `saturate()`) |
+| `gamma` | `1` | midtones, 0.1..10 (above 1 brightens the midtones) |
+| `temperature`, `tint` | `0` | white balance, -1..1 (temperature: + warmer / - cooler; tint: + magenta / - green) |
+| `hue` | `0` | hue rotation in degrees, -360..360 |
+| `sepia`, `vignette` | `0` | 0..1 |
+| `blur` | `0` | Gaussian blur in px, 0..200 (can be keyframed) |
+| `blend` | `"normal"` | how the picture mixes with the tracks under it: `normal`, `multiply`, `screen`, `overlay`, `softLight`, `hardLight`, `darken`, `lighten`, `colorDodge`, `colorBurn`, `add`, `difference`, `exclusion` |
+| `mask` | | `{"shape":"ellipse"\|"rect","x":50,"y":50,"w":60,"h":60,"feather":8,"invert":false}`: only that part of the clip shows (percent of the clip; feather = percent of its shorter side) |
+| `key` | | chroma key (video/image): `{"color":"#00ff00","similarity":0.3,"smooth":0.08,"spill":0.6}` makes that color transparent |
+| `pan` | `0` | stereo balance, -1 (left) .. 1 (right) |
+| `labelColor` | | timeline color: `red`, `orange`, `yellow`, `green`, `teal`, `blue`, `violet`, `pink`, `brown`, `gray` |
+| `link` | | clips with the same link string move, trim, split and delete together (a video and its detached audio) |
 | `props` | `{}` | html clips only: data passed to the composition |
 | `label` | | display name in the editor |
 | `disabled` | `false` | keep the clip but skip it |
@@ -143,7 +154,7 @@ Rules:
   `@kadr/iris.html`, `@kadr/stripes.html`. The editor's transition picker writes exactly these.
 
 ### Keyframes
-`x`, `y`, `scale`, `rotation`, `opacity` and `volume` can be animated:
+`x`, `y`, `scale`, `rotation`, `opacity`, `volume` and `blur` can be animated:
 
 ```json
 "keys": { "scale": [[0, 1], [4, 1.15]], "x": [[0, -40], [4, 40, "linear"]], "opacity": [[0, 0], [0.4, 1]] }
@@ -152,7 +163,8 @@ Rules:
 - Each key is `[time, value]` or `[time, value, ease]`; **time is seconds from the clip's
   `start`** (not the timeline). Keys are sorted by time.
 - `ease` shapes the move from that key to the next: `ease` (default, smooth in-out),
-  `linear`, `in`, `out`, `hold` (jump at the next key).
+  `linear`, `in`, `out`, `smooth` (gentle sine), `back` (overshoots, then settles), `elastic`,
+  `bounce`, `hold` (jump at the next key).
 - Before the first key the value is the first key's value; after the last key, the last one's.
 - An animated property ignores its static field. Remove `keys.<prop>` to go back to it.
 - Ken Burns: `"keys": {"scale": [[0, 1], [6, 1.12, "linear"]]}` with `"fit": "cover"`.
@@ -162,6 +174,10 @@ Rules:
 - `kadr freeze <src> <sourceTime>` writes a still to `media/freeze/` (use it as an image clip for a freeze frame).
 - `kadr reverse <src> --in <s> --span <s>` writes a reversed copy to `media/reversed/`;
   point the clip's `src` at it with `in: 0`.
+- `kadr stabilize <video> --in <s> --span <s>` writes a steadied copy to `media/stable/` (use it the same way).
+- `kadr denoise <file>` writes a copy with less background noise to `media/clean/` (same timing: just change `src`).
+- Effects order (identical in preview and export): key → brightness/contrast/saturation → white balance,
+  hue, sepia → gamma → vignette → blur → crop → mask → opacity → blend.
 - Leave out fields that equal their defaults. kadr removes them on save anyway.
 
 ## Compositions (`comps/*.html`)
@@ -307,6 +323,9 @@ kadr stock get <n...>             download results -> media/stock/ (credits in C
 kadr site <url>                   read a website -> brief/site-<host>.md + media/site/<host>/
 kadr render [-o renders/x.mp4] [--from t] [--to t] [--crf 18] [--codec h264|h265|prores|av1|vp9]
             [--size 3840x2160] [--loudness -14] [--motion-blur 8]
+            (-o x.gif for a GIF; -o x.wav / .mp3 / .m4a / .flac for the sound only)
+kadr stabilize <video> [--in s] [--span s]   steadied copy -> media/stable/
+kadr denoise <file>               less background noise -> media/clean/
 ```
 
 ## Recipes
@@ -321,7 +340,11 @@ kadr render [-o renders/x.mp4] [--from t] [--to t] [--crf 18] [--codec h264|h265
 - **Vertical video**: set `width: 1080, height: 1920`, and give footage `fit: "cover"`.
 - **Music bed**: `audio` clip on `A1`, `volume: 0.35`, `fadeOut: 2`.
 - **Slow motion**: `speed: 0.5` and twice the duration for the same moment.
-- **Look**: `contrast: 1.1, saturation: 1.15` on footage for a punchier image; `saturation: 0` for black and white.
+- **Look**: `contrast: 1.1, saturation: 1.15` on footage for a punchier image; `saturation: 0` for black and white;
+  `temperature: 0.4` for golden hour; `contrast: 1.16, saturation: 0.86, vignette: 0.35` for a cinematic feel.
+- **Green screen**: `"key": {"color": "#00ff00"}` on the footage over a background on the track below.
+- **Vertical video from wide footage**: a copy on the track below with `fit: "cover", blur: 40, brightness: 0.8`.
+- **Cinema bars**: `"mask": {"shape": "rect", "w": 100, "h": 74.4, "feather": 0}`.
 - **Transition between two shots**: `@kadr/wipe.html` on the top track centered on the cut, or
   `fadeOut`/`fadeIn` of 0.3 on both clips for a dip.
 - **Delivery**: `kadr render --loudness -14` for web/social (EBU R128), `--codec prores` for a master,

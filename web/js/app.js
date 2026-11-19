@@ -1,11 +1,11 @@
 import { validateProject } from '/shared/model.js';
 import {
   S, on, emit, loadProject, undo, redo, canUndo, canRedo, toggle, seek, snapFrame, fps, duration,
-  select, selectMarker, publishState, setStatus, pause, commit, flushSave,
+  select, selectMarker, publishState, setStatus, pause, commit, flushSave, shuttle, setInOut, toast,
 } from './state.js';
 import { $, h, api, basename } from './util.js';
-import { resetLayers, reloadAsset } from './viewer.js';
-import { render as renderTimeline, setZoom, zoomFit, setTool, toggleSnap } from './timeline.js';
+import { resetLayers, reloadAsset, setViewZoom } from './viewer.js';
+import { render as renderTimeline, setZoom, zoomFit, setTool, toggleSnap, toggleLinked, TOOLS } from './timeline.js';
 import './inspector.js';
 import { render as renderBin, importFiles, addText } from './bin.js';
 import { openExport } from './exporter.js';
@@ -14,11 +14,18 @@ import { openProjects } from './projects.js';
 import { openGallery } from './gallery.js';
 import { ART } from './art.js';
 import './compedit.js';
-import { splitAtPlayhead, deleteSelected, duplicateSelected, addMarker, addTrack, copySelected, paste, nudge, rippleTrim, jumpKey, clipById, isLocked } from './ops.js';
+import {
+  splitAtPlayhead, deleteSelected, duplicateSelected, addMarker, addTrack, copySelected, paste, nudge, rippleTrim, jumpKey, clipById, isLocked,
+  liftExtract, insertMedia, linkClips, unlinkClips,
+} from './ops.js';
 import { toggleGuides } from './viewer.js';
 import { initMenubar } from './menubar.js';
 import { openBrief } from './brief.js';
 import { initWorkspace, setTimelineHeight } from './workspace.js';
+import { renderEffects } from './effects.js';
+import { renderMarkers } from './markers.js';
+import { initMeters } from './audio.js';
+import { initAppearance } from './appearance.js';
 
 // ---------- loading ----------
 async function loadMedia() {
@@ -46,6 +53,7 @@ function applyProject(raw, opts) {
   const size = `${S.project.width}x${S.project.height}`;
   if (size !== lastSize) { lastSize = size; resetLayers(); }
   $('#projName').textContent = S.project.name;
+  $('#vhSeq').textContent = `${S.project.name} · ${S.project.width}×${S.project.height} · ${S.project.fps} fps`;
   document.title = `${S.project.name} · kadr`;
   drawPills();
 }
@@ -162,16 +170,30 @@ function copyBtn(text, label = 'Copy') {
 }
 
 const KEYS = [
-  ['Space', 'play / pause'], ['← →', 'previous / next frame (Shift: 1 s)'], ['↑ ↓', 'previous / next edit'],
-  ['S', 'split at playhead'], ['Q · W', 'ripple trim head · tail to playhead'], ['C · V', 'razor · select'],
+  ['Space', 'play / pause'], ['J · K · L', 'shuttle back · stop · forward (press again: faster)'], ['← →', 'previous / next frame (Shift: 1 s)'], ['↑ ↓', 'previous / next edit'],
+  ['V A B E R', 'select · track select · ripple · rolling · rate stretch'], ['C Y U H', 'razor · slip · slide · hand'],
+  ['S', 'split at playhead'], ['Q · W', 'ripple trim head · tail to playhead'],
   ['Del', 'delete (Shift: ripple)'], ['Ctrl C X V', 'copy · cut · paste at playhead'], ['Ctrl D', 'duplicate'],
-  ['Alt ← →', 'nudge clips a frame (Shift: 10)'], ['Alt drag', 'copy a clip'], ['Shift E', 'enable / disable'],
-  ['[ ]', 'previous / next keyframe'], ['I · O · X', 'in · out · clear'], ['M', 'marker'], ['T', 'text clip'],
-  ['N', 'snapping'], ['G', 'safe-area guides'], ['+ − \\', 'zoom · fit'], ['Right-click', 'clip, gap and track menus'],
+  ['Ctrl G', 'link clips (Shift: unlink)'], ['Alt ← →', 'nudge clips a frame (Shift: 10)'], ['Alt drag', 'copy a clip'], ['Shift E', 'enable / disable'],
+  ['I · O · X', 'in · out · clear'], ['; · \'', 'lift · extract in → out'], [', · .', 'insert · overwrite the picked media'],
+  ['[ ]', 'previous / next keyframe'], ['M', 'marker (Shift M: next marker)'], ['T', 'text clip'],
+  ['N', 'snapping'], ['G', 'safe-area guides'], ['+ − \\', 'zoom · fit'], ['Ctrl wheel', 'zoom the preview (Alt drag: pan)'], ['Right-click', 'clip, gap and track menus'],
   ['Ctrl Z', 'undo (agent edits too)'], ['Ctrl E', 'export'], ['Ctrl O', 'projects: recent · open · new'], ['/', 'open chat'],
 ];
 $('#helpBtn').onclick = (e) => openPop(e.currentTarget, h('div.sec', {}, h('h4', {}, 'Keyboard'),
   h('div.keys', {}, ...KEYS.flatMap(([k, v]) => [h('span.kbd', {}, k), h('span', {}, v)]))));
+
+// ---------- left panel tabs (Media · Effects · Markers) ----------
+function setLeftTab(name) {
+  for (const t of document.querySelectorAll('.ltab')) t.classList.toggle('on', t.dataset.ltab === name);
+  for (const p of document.querySelectorAll('.lpane')) p.classList.toggle('on', p.dataset.lpane === name);
+  try { localStorage.setItem('kadr.ltab', name); } catch { /* ignore */ }
+  if (name === 'effects') renderEffects();
+  if (name === 'markers') renderMarkers();
+  emit('left-tab', name);
+}
+for (const t of document.querySelectorAll('.ltab')) t.onclick = () => setLeftTab(t.dataset.ltab);
+{ let t = 'media'; try { t = localStorage.getItem('kadr.ltab') || 'media'; } catch { /* ignore */ } setLeftTab(t); }
 
 // ---------- right panel tabs ----------
 function setTab(name) {
@@ -198,8 +220,14 @@ $('#templatesBtn').onclick = openGallery;
 $('#startArt').innerHTML = ART.stage();
 function importDialog() { const inp = h('input', { type: 'file', multiple: true, accept: 'video/*,audio/*,image/*,.html' }); inp.onchange = () => importFiles([...inp.files]); inp.click(); }
 $('#startImport').onclick = importDialog;
-initWorkspace({ setTab });
-initMenubar({ setTab, importDialog });
+initAppearance();
+initWorkspace({ setTab, setLeftTab });
+initMenubar({ setTab, setLeftTab, importDialog });
+initMeters($('#meters'));
+$('#tMarkIn')?.addEventListener('click', () => setInOut(snapFrame(S.t), undefined));
+$('#tMarkOut')?.addEventListener('click', () => setInOut(undefined, snapFrame(S.t)));
+$('#tLift')?.addEventListener('click', () => liftExtract(false));
+$('#tExtract')?.addEventListener('click', () => liftExtract(true));
 $('#startTemplates').onclick = openGallery;
 $('#startChat').onclick = () => openBrief();
 $('#splitBtn').onclick = splitAtPlayhead;
@@ -265,6 +293,8 @@ window.addEventListener('keydown', (e) => {
   const stop = () => e.preventDefault();
   if (mod && k.toLowerCase() === 'z') { stop(); return e.shiftKey ? redo() : undo(); }
   if (mod && k.toLowerCase() === 'y') { stop(); return redo(); }
+  if (mod && k.toLowerCase() === 'g') { stop(); return e.shiftKey ? unlinkClips([...S.sel]) : linkClips([...S.sel]); }
+  if (mod && (k === '0' || k === ')')) { stop(); return setViewZoom('fit'); }
   if (mod && k.toLowerCase() === 'd') { stop(); return duplicateSelected(); }
   if (mod && k.toLowerCase() === 'a') { stop(); return select(S.project.clips.filter((c) => !isLocked(c)).map((c) => c.id)); }
   if (mod && k.toLowerCase() === 'c') { stop(); return copySelected(); }
@@ -289,24 +319,43 @@ window.addEventListener('keydown', (e) => {
     }
     case 'Home': stop(); seek(0); break;
     case 'End': stop(); seek(duration()); break;
-    case 'l': case 'L': if (e.shiftKey) { $('#tLoop').click(); } else toggle(); break;
+    case 'l': case 'L': if (e.shiftKey) { $('#tLoop').click(); } else shuttle(1); break;
     case 'k': case 'K': pause(); break;
-    case 'j': case 'J': pause(); seek(S.t - 1); break;
+    case 'j': case 'J': shuttle(-1); break;
     case 's': case 'S': splitAtPlayhead(); break;
     case 'q': case 'Q': rippleTrim('head'); break;
     case 'w': case 'W': rippleTrim('tail'); break;
     case '[': jumpKey(-1); break;
     case ']': jumpKey(1); break;
     case 'g': case 'G': toggleGuides(); break;
-    case 'e': case 'E': if (!e.shiftKey || !S.sel.size) return; commit(() => { const v = !clipById([...S.sel][0])?.disabled; for (const id of S.sel) { const c = clipById(id); if (c) c.disabled = v; } }); break;
+    case 'e': case 'E': if (!e.shiftKey) { setTool('roll'); break; } if (!S.sel.size) return; commit(() => { const v = !clipById([...S.sel][0])?.disabled; for (const id of S.sel) { const c = clipById(id); if (c) c.disabled = v; } }); break;
     case 'c': case 'C': setTool('razor'); break;
     case 'v': case 'V': setTool('select'); break;
+    case 'a': case 'A': setTool('track'); break;
+    case 'b': case 'B': setTool('ripple'); break;
+    case 'r': case 'R': setTool('rate'); break;
+    case 'y': case 'Y': setTool('slip'); break;
+    case 'u': case 'U': setTool('slide'); break;
+    case 'h': case 'H': setTool('hand'); break;
     case 'n': case 'N': toggleSnap(); break;
     case 't': case 'T': addText(); break;
-    case 'm': case 'M': selectMarker(addMarker(S.t)); break;
-    case 'i': case 'I': S.inPt = snapFrame(S.t); if (S.outPt != null && S.outPt <= S.inPt) S.outPt = null; renderTimeline(); publishState(); break;
-    case 'o': case 'O': S.outPt = snapFrame(S.t); if (S.inPt != null && S.inPt >= S.outPt) S.inPt = null; renderTimeline(); publishState(); break;
-    case 'x': case 'X': S.inPt = null; S.outPt = null; renderTimeline(); publishState(); break;
+    case 'm': case 'M': {
+      if (!e.shiftKey) { selectMarker(addMarker(S.t)); break; }
+      const next = [...S.project.markers].sort((a, b) => a.t - b.t).find((m) => m.t > S.t + 1e-4);
+      if (next) { seek(next.t); selectMarker(next.id); }
+      break;
+    }
+    case 'i': case 'I': setInOut(snapFrame(S.t), undefined); break;
+    case 'o': case 'O': setInOut(undefined, snapFrame(S.t)); break;
+    case 'x': case 'X': setInOut(null, null); break;
+    case ';': stop(); liftExtract(false); break;
+    case '\'': stop(); liftExtract(true); break;
+    case ',': case '.': {
+      stop();
+      if (!S.binSel) { toast('Click a file in the Media panel first, then , inserts and . overwrites it at the playhead'); break; }
+      insertMedia(S.binSel, { overwrite: k === '.' });
+      break;
+    }
     case 'Delete': case 'Backspace': stop(); deleteSelected({ ripple: e.shiftKey }); break;
     case 'Escape': select([]); setTool('select'); $('#pop').hidden = true; break;
     case '/': stop(); setTab('chat'); break;

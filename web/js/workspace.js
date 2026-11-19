@@ -6,15 +6,21 @@ import { openMenu } from './menu.js';
 import { toast } from './state.js';
 
 const PRESETS = {
-  editing: { name: 'Editing', media: true, side: true, swap: false, mediaW: 236, sideW: 330, tlH: 300, tab: 'props' },
-  ai: { name: 'AI', media: true, side: true, swap: false, mediaW: 210, sideW: 460, tlH: 260, tab: 'chat' },
+  editing: { name: 'Editing', media: true, side: true, swap: false, mediaW: 264, sideW: 340, tlH: 300, tab: 'props', left: 'media' },
+  color: { name: 'Color', media: true, side: true, swap: false, mediaW: 286, sideW: 360, tlH: 228, tab: 'props', left: 'effects', focus: 'Color' },
+  effects: { name: 'Effects', media: true, side: true, swap: false, mediaW: 290, sideW: 350, tlH: 280, tab: 'props', left: 'effects' },
+  audio: { name: 'Audio', media: true, side: true, swap: false, mediaW: 250, sideW: 330, tlH: 410, tab: 'props', left: 'media', focus: 'Audio' },
+  ai: { name: 'AI', media: true, side: true, swap: false, mediaW: 220, sideW: 460, tlH: 260, tab: 'chat', left: 'media' },
   preview: { name: 'Big preview', media: false, side: true, swap: false, mediaW: 236, sideW: 300, tlH: 210, tab: 'props' },
-  timeline: { name: 'Big timeline', media: true, side: true, swap: false, mediaW: 210, sideW: 300, tlH: 440, tab: 'props' },
+  timeline: { name: 'Big timeline', media: true, side: true, swap: false, mediaW: 220, sideW: 300, tlH: 440, tab: 'props' },
 };
+// shown as tabs in the header, like the workspace bar of other editors
+const TABS = ['editing', 'color', 'effects', 'audio', 'ai'];
 
 let L = null; // current layout (+ id of the workspace it came from)
 let custom = {};
 let setTab = () => {};
+let setLeftTab = () => {};
 let selfResize = false; // our own resize event, not the window's
 
 const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? d; } catch { return d; } };
@@ -59,7 +65,20 @@ export function useWorkspace(id) {
   L = { ...w, id };
   apply();
   setTab(w.tab || 'props');
+  if (w.left) setLeftTab(w.left);
   paintButton();
+  if (w.focus) focusSection(w.focus);
+}
+
+/** Open and scroll to an inspector section (Color, Audio…). */
+export function focusSection(name) {
+  setTimeout(() => {
+    const t = [...document.querySelectorAll('#inspector .sec-t')].find((b) => b.textContent.trim() === name);
+    if (!t) return;
+    const s = t.closest('.sec');
+    if (s.classList.contains('folded')) t.click();
+    s.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, 60);
 }
 
 /** Change part of the layout (the workspace becomes "modified"). */
@@ -71,7 +90,14 @@ function change(patch) {
 
 function paintButton() {
   const b = $('#wsBtn span');
-  if (b) b.textContent = `${all()[L.id]?.name || 'Custom'}${L.modified ? ' *' : ''}`;
+  if (b) b.textContent = TABS.includes(L.id) ? 'Layout' : `${all()[L.id]?.name || 'Custom'}${L.modified ? ' *' : ''}`;
+  const bar = $('#wsTabs');
+  if (bar) {
+    if (!bar.children.length) {
+      bar.replaceChildren(...TABS.map((id) => h('button.ws-tab', { type: 'button', 'data-ws': id, on: { click: () => useWorkspace(id) } }, PRESETS[id].name)));
+    }
+    for (const t of bar.children) t.classList.toggle('on', t.dataset.ws === L.id);
+  }
 }
 
 function saveAs() {
@@ -157,6 +183,7 @@ export function setTimelineHeight(px) {
 
 export function initWorkspace(opts) {
   setTab = opts.setTab;
+  setLeftTab = opts.setLeftTab || setLeftTab;
   custom = load('kadr.workspaces', {});
   const saved = load('kadr.layout', null);
   L = saved && typeof saved === 'object' ? { ...PRESETS.editing, ...saved } : { ...PRESETS.editing, id: 'editing' };

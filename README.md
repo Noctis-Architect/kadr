@@ -38,10 +38,23 @@ shows, and the preview updates as they save.
   rename, right-click menus, safe-area / thirds guides.
 - **Templates**: kinetic type, word-highlight captions, wipe transition, end card,
   title, lower third, counter, text. Their props become controls in the inspector.
+- **Effects, like Premiere's Lumetri and After Effects**: color (brightness, contrast,
+  midtones, saturation, temperature, tint, hue, sepia, vignette) with 15 one-click looks,
+  Gaussian blur, chroma key (green / blue screen, spill removal, eyedropper), ellipse and
+  rectangle masks with feather, 13 blend modes, stereo pan. An Effects panel (searchable,
+  drag onto a clip) with motion presets (Ken Burns, pop, slide, bounce, shake, blur in…),
+  layouts (picture in picture, split screen, blurred background fill, cinema bars) and audio
+  fixes (normalize, noise reduction). Everything renders identically in preview and export.
+- **Pro timeline tools**: track select forward, ripple, rolling, rate stretch, slip and slide
+  edits, linked clips (Ctrl+G), lift / extract, insert / overwrite, J/K/L shuttle, label colors,
+  track solo, colored markers with a Markers panel, scene edit detection, silence removal
+  (jump cuts), stabilize, audio meters, typed timecode, preview zoom and full screen.
+- **Workspaces and appearance**: Editing, Color, Effects, Audio and AI workspaces; accent
+  color, interface brightness and text size (Window → Appearance).
 - **Delivery-grade export**: presets (Web, Social, Master, Small, Draft), H.264 High /
   H.265 / ProRes 422 HQ 10-bit / AV1 / VP9, BT.709 tagged, two-pass EBU R128
   loudness (-14 / -16 / -23 LUFS), motion blur for motion graphics (sub-frames over
-  a 180° shutter), output scaling up to 4K.
+  a 180° shutter), output scaling up to 4K, animated GIF, and sound-only WAV / MP3 / M4A / FLAC.
 - **Motion graphics as HTML/CSS/JS**: a composition is a web page. The kadr
   runtime owns the clock, so CSS animations, JS (`kadr.onFrame`), canvas or
   GSAP are deterministic: the preview and the export match frame for frame.
@@ -132,7 +145,9 @@ project folder                       kadr serve (Node, 127.0.0.1 only)
 
 ## Keys
 
-Space play · ←/→ frame (Shift 1 s) · ↑/↓ previous/next edit · S split · C razor · V select ·
+Space play · J/K/L shuttle · ←/→ frame (Shift 1 s) · ↑/↓ previous/next edit · S split ·
+V select · A track select · B ripple · E rolling · R rate stretch · C razor · Y slip · U slide · H hand ·
+Ctrl+G link (Shift unlink) · ; lift · ' extract · , insert · . overwrite · Shift+M next marker ·
 Del delete (Shift ripple) · Q/W ripple trim to playhead · Ctrl+C/X/V copy/cut/paste ·
 Ctrl+D duplicate · Alt+←/→ nudge · Alt+drag copy · Shift+E enable/disable · [ ] keyframes ·
 I/O in/out · X clear · M marker · T text · N snapping · G guides · +/−/\ zoom ·

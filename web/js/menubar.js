@@ -1,10 +1,13 @@
 // Menu bar at the top left (File, Edit, View, Insert, AI, Help), like other
 // editing apps: every command can be found by browsing, with its shortcut.
-import { S, undo, redo, canUndo, canRedo, select, selectMarker, commit, publishState, snapFrame, toast } from './state.js';
+import { S, undo, redo, canUndo, canRedo, select, selectMarker, commit, publishState, snapFrame, toast, setInOut } from './state.js';
 import { $, h, api } from './util.js';
 import { openMenu, closeMenu, menuOpen } from './menu.js';
-import { setZoom, zoomFit, toggleSnap, render as renderTimeline } from './timeline.js';
-import { toggleGuides } from './viewer.js';
+import { setZoom, zoomFit, toggleSnap, toggleLinked, setTrackSize, trackSize, setTool, TOOLS } from './timeline.js';
+import { toggleGuides, setViewZoom } from './viewer.js';
+import { LOOKS, MOTION, applyLook, applyEffect } from './effects.js';
+import { openAppearance } from './appearance.js';
+import { focusSection } from './workspace.js';
 import { addText } from './bin.js';
 import { openExport } from './exporter.js';
 import { openProjects } from './projects.js';
@@ -17,6 +20,7 @@ import { cutNear, openTransitionPopup } from './transitions.js';
 import { workspaceItems } from './workspace.js';
 import {
   splitAtPlayhead, deleteSelected, duplicateSelected, addMarker, addTrack, copySelected, paste, clipById, isLocked,
+  liftExtract, insertMedia, linkClips, unlinkClips, detectScenes, removeSilences, stabilizeClip, freezeFrame, reverseClip, detachAudio, setSpeed,
 } from './ops.js';
 
 const mac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -41,6 +45,8 @@ let actions = {};
 function menus() {
   const sel = [...S.sel].map(clipById).filter(Boolean);
   const hasSel = sel.length > 0;
+  const one = sel.length === 1 ? sel[0] : null;
+  const visualSel = sel.filter((c) => c.type !== 'audio' && !isLocked(c));
   const guidesOn = $('#tGuides')?.classList.contains('on');
   const ask = (text) => { actions.setTab('chat'); askChat(text); };
   return {
@@ -66,14 +72,61 @@ function menus() {
       { label: 'Delete and close gap', kbd: K('Shift+Del'), disabled: !hasSel, on: () => deleteSelected({ ripple: true }) },
       '-',
       { label: 'Split at playhead', kbd: 'S', on: splitAtPlayhead },
+      { label: 'Lift in → out', kbd: ';', disabled: S.inPt == null && S.outPt == null, on: () => liftExtract(false) },
+      { label: 'Extract in → out', kbd: '\'', disabled: S.inPt == null && S.outPt == null, on: () => liftExtract(true) },
+      '-',
+      { label: 'Link clips', kbd: K('Ctrl+G'), disabled: sel.length < 2, on: () => linkClips(sel.map((c) => c.id)) },
+      { label: 'Unlink', kbd: K('Ctrl+Shift+G'), disabled: !sel.some((c) => c.link), on: () => unlinkClips(sel.map((c) => c.id)) },
+      { label: 'Linked selection', checked: !!S.linked, on: toggleLinked },
+      '-',
       { label: hasSel && sel.every((c) => c.disabled) ? 'Enable clip' : 'Disable clip', kbd: K('Shift+E'), disabled: !hasSel, on: () => commit(() => { const v = !sel[0].disabled; for (const c of sel) { const x = clipById(c.id); if (x) x.disabled = v; } }) },
       { label: 'Select all', kbd: K('Ctrl+A'), on: () => select(S.project.clips.filter((c) => !isLocked(c)).map((c) => c.id)) },
       { label: 'Deselect', kbd: 'Esc', disabled: !hasSel, on: () => select([]) },
+    ],
+    Clip: [
+      { label: 'Tools', disabled: true },
+      ...TOOLS.map((t) => ({ label: t.name, kbd: t.key, sub: true, checked: S.tool === t.id, on: () => setTool(t.id) })),
+      '-',
+      { label: 'Speed', disabled: true },
+      ...[[0.25, '25%'], [0.5, '50%'], [1, '100%'], [2, '200%'], [4, '400%']].map(([v, l]) => ({ label: l, sub: true, disabled: !one || one.type === 'image', on: () => commit(() => setSpeed(clipById(one.id), v)) })),
+      '-',
+      { label: 'Freeze frame at playhead', disabled: one?.type !== 'video', on: () => freezeFrame(one) },
+      { label: 'Reverse', disabled: !(one && (one.type === 'video' || one.type === 'audio')), on: () => reverseClip(one) },
+      { label: 'Detach audio', disabled: !(one?.type === 'video' && S.media.get(one.src)?.hasAudio), on: () => detachAudio(one) },
+      '-',
+      { label: 'Scene edit detection', disabled: one?.type !== 'video', on: () => detectScenes(one) },
+      { label: 'Remove silent parts', disabled: !(one && (one.type === 'video' || one.type === 'audio')), on: () => removeSilences(one) },
+      { label: 'Stabilize', disabled: one?.type !== 'video', on: () => stabilizeClip(one) },
+      { label: 'Normalize audio', disabled: !sel.some((c) => c.type === 'video' || c.type === 'audio'), on: () => applyEffect('normalize') },
+      { label: 'Reduce noise', disabled: !(one && (one.type === 'video' || one.type === 'audio')), on: () => applyEffect('denoise') },
+    ],
+    Effects: [
+      { label: 'Effects & presets panel', on: () => actions.setLeftTab('effects') },
+      { label: 'Effect controls', on: () => actions.setTab('props') },
+      '-',
+      { label: 'Looks', disabled: true },
+      ...LOOKS.map((l) => ({ label: l.name, sub: true, disabled: !visualSel.length, on: () => commit(() => { for (const c of visualSel) applyLook(clipById(c.id), l); }) })),
+      '-',
+      { label: 'Animate', disabled: true },
+      ...MOTION.filter((m) => m.id !== 'clear').map((m) => ({ label: m.name, sub: true, disabled: !visualSel.length, on: () => commit(() => { for (const c of visualSel) m.fn(clipById(c.id)); }) })),
+      '-',
+      { label: 'Gaussian blur', disabled: !visualSel.length, on: () => applyEffect('blur') },
+      { label: 'Vignette', disabled: !visualSel.length, on: () => applyEffect('vignette') },
+      { label: 'Chroma key (green screen)', disabled: !visualSel.length, on: () => { applyEffect('keyGreen'); focusSection('Chroma key'); } },
+      { label: 'Ellipse mask', disabled: !visualSel.length, on: () => { applyEffect('maskEllipse'); focusSection('Mask'); } },
+      { label: 'Blurred background fill', disabled: !visualSel.length, on: () => applyEffect('blurBg') },
+      { label: 'Picture in picture', disabled: !visualSel.length, on: () => applyEffect('pipBR') },
     ],
     View: [
       { label: 'Zoom in', kbd: '+', on: () => setZoom(S.pps * 1.4) },
       { label: 'Zoom out', kbd: '−', on: () => setZoom(S.pps / 1.4) },
       { label: 'Fit timeline', kbd: '\\', on: zoomFit },
+      { label: 'Track height', disabled: true },
+      ...[['s', 'Small'], ['m', 'Medium'], ['l', 'Large']].map(([k, n]) => ({ label: n, sub: true, checked: trackSize() === k, on: () => setTrackSize(k) })),
+      '-',
+      { label: 'Preview zoom', disabled: true },
+      ...[['fit', 'Fit'], [0.5, '50%'], [1, '100%'], [2, '200%']].map(([z, n]) => ({ label: n, sub: true, kbd: z === 'fit' ? K('Ctrl+0') : undefined, on: () => setViewZoom(z) })),
+      { label: 'Full screen preview', on: () => $('#tFull')?.click() },
       '-',
       { label: 'Snapping', kbd: 'N', checked: !!S.snap, on: toggleSnap },
       { label: 'Safe-area guides', kbd: 'G', checked: !!guidesOn, on: toggleGuides },
@@ -81,6 +134,9 @@ function menus() {
       '-',
       { label: 'Properties', on: () => actions.setTab('props') },
       { label: 'Chat', kbd: '/', on: () => actions.setTab('chat') },
+      { label: 'Media', on: () => actions.setLeftTab('media') },
+      { label: 'Effects', on: () => actions.setLeftTab('effects') },
+      { label: 'Markers', on: () => actions.setLeftTab('markers') },
     ],
     Insert: [
       { label: 'Text', kbd: 'T', on: addText },
@@ -98,9 +154,12 @@ function menus() {
       { label: 'Video track', on: () => addTrack('video') },
       { label: 'Audio track', on: () => addTrack('audio') },
       '-',
-      { label: 'Set in point', kbd: 'I', on: () => { S.inPt = snapFrame(S.t); if (S.outPt != null && S.outPt <= S.inPt) S.outPt = null; renderTimeline(); publishState(); } },
-      { label: 'Set out point', kbd: 'O', on: () => { S.outPt = snapFrame(S.t); if (S.inPt != null && S.inPt >= S.outPt) S.inPt = null; renderTimeline(); publishState(); } },
-      { label: 'Clear in / out', kbd: 'X', disabled: S.inPt == null && S.outPt == null, on: () => { S.inPt = null; S.outPt = null; renderTimeline(); publishState(); } },
+      { label: 'Set in point', kbd: 'I', on: () => setInOut(snapFrame(S.t), undefined) },
+      { label: 'Set out point', kbd: 'O', on: () => setInOut(undefined, snapFrame(S.t)) },
+      { label: 'Clear in / out', kbd: 'X', disabled: S.inPt == null && S.outPt == null, on: () => setInOut(null, null) },
+      '-',
+      { label: 'Insert picked media at playhead', kbd: ',', disabled: !S.binSel, on: () => insertMedia(S.binSel) },
+      { label: 'Overwrite with picked media', kbd: '.', disabled: !S.binSel, on: () => insertMedia(S.binSel, { overwrite: true }) },
     ],
     AI: [
       { label: 'New video from a brief…', on: () => openBrief() },
@@ -114,7 +173,7 @@ function menus() {
       { label: 'Ready-made jobs', disabled: true },
       ...RECIPES.map(([label, text]) => ({ label, sub: true, on: () => ask(text) })),
     ],
-    Window: workspaceItems(),
+    Window: [...workspaceItems(), '-', { label: 'Appearance…', on: openAppearance }],
     Help: [
       { label: 'Keyboard shortcuts', on: () => $('#helpBtn')?.click() },
       { label: 'Tip: right-click clips, gaps and tracks for more', disabled: true },

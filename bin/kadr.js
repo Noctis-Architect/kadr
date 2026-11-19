@@ -7,7 +7,7 @@ import {
   normalizeProject, validateProject, projectDuration, tc, parseTime, uid, mediaKind, trackKindFor, clipEnd,
 } from '../shared/model.js';
 import { findRoot, readProject, writeProject, validateFull, APP_DIR, resolveSrc, compUrl } from '../src/project.js';
-import { Media, run, probe } from '../src/media.js';
+import { Media, run, probe, sceneCuts, silences } from '../src/media.js';
 import { startServer } from '../src/server.js';
 import { renderProject } from '../src/render.js';
 import { Browser } from '../src/chrome.js';
@@ -83,11 +83,15 @@ media helpers (write new files into media/, print the path)
   freeze <video> <sourceTime>     still PNG of one frame -> media/freeze/
   reverse <file> [--in 0] [--span s]
                                   reversed copy -> media/reversed/
+  stabilize <video> [--in 0] [--span s]
+                                  steadied copy (no camera shake) -> media/stable/
+  denoise <file>                  copy with less background noise -> media/clean/
 
 export
   render [-o renders/out.mp4] [--from t] [--to t] [--crf 18] [--preset medium]
          [--codec h264|h265|prores|av1|vp9] [--size 3840x2160] [--loudness -14]
          [--motion-blur 8] [--shutter 180] [--workers n] [--no-cache]
+         (-o x.gif: animated GIF · -o x.wav / .mp3 / .m4a / .flac: the sound only)
   clean                           delete cached renders in .kadr/cache
 
 times accept 12.5, 1:02.5, 00:01:02:15 (frames).`;
@@ -588,16 +592,33 @@ ${r.description || ''}`.trim());
     console.log(await media.reverse(rel, inT, span));
   },
 
+  async stabilize(args) {
+    const f = args._[0];
+    if (!f) die('usage: kadr stabilize <video> [--in 0] [--span s]');
+    const root = projectRoot(args);
+    const media = new Media(root);
+    await media.load();
+    const rel = path.relative(root, path.resolve(f));
+    const info = await media.info(rel);
+    const inT = args.in != null ? parseTime(args.in) : 0;
+    const span = args.span != null ? parseTime(args.span) : (info.duration || 0) - inT;
+    console.log(await media.stabilize(rel, inT, span));
+  },
+
+  async denoise(args) {
+    const f = args._[0];
+    if (!f) die('usage: kadr denoise <file>');
+    const root = projectRoot(args);
+    const media = new Media(root);
+    await media.load();
+    console.log(await media.denoise(path.relative(root, path.resolve(f))));
+  },
+
   async scenes(args) {
     const f = args._[0];
     if (!f) die('usage: kadr scenes <video> [--threshold 0.3]');
     const th = Number(args.threshold) || 0.3;
-    const { stdout } = await run('ffmpeg', ['-hide_banner', '-v', 'error', '-i', path.resolve(f), '-an', '-vf', `select='gt(scene,${th})',metadata=print:file=-`, '-f', 'null', '-'], { stderr: true });
-    const cuts = [];
-    const re = /pts_time:([\d.]+)[\s\S]*?lavfi\.scene_score=([\d.]+)/g;
-    let m;
-    while ((m = re.exec(stdout))) cuts.push({ t: Math.round(Number(m[1]) * 1000) / 1000, score: Math.round(Number(m[2]) * 1000) / 1000 });
-    console.log(JSON.stringify({ file: f, threshold: th, cuts }, null, 2));
+    console.log(JSON.stringify({ file: f, threshold: th, cuts: await sceneCuts(path.resolve(f), th) }, null, 2));
   },
 
   async silence(args) {
@@ -606,18 +627,7 @@ ${r.description || ''}`.trim());
     const noise = Number(args.noise ?? -35);
     const min = Number(args.min ?? 0.4);
     const info = await probe(path.resolve(f));
-    const { stderr } = await run('ffmpeg', ['-hide_banner', '-nostats', '-i', path.resolve(f), '-vn', '-af', `silencedetect=n=${noise}dB:d=${min}`, '-f', 'null', '-'], { stderr: true });
-    const out = [];
-    let cur = null;
-    for (const l of stderr.split('\n')) {
-      const s = l.match(/silence_start: (-?[\d.]+)/);
-      const e = l.match(/silence_end: ([\d.]+)/);
-      if (s) cur = { start: Math.max(0, Number(s[1])) };
-      if (e && cur) { cur.end = Number(e[1]); out.push(cur); cur = null; }
-    }
-    if (cur) { cur.end = info.duration; out.push(cur); }
-    const r = (n) => Math.round(n * 1000) / 1000;
-    console.log(JSON.stringify({ file: f, duration: info.duration, noiseDb: noise, minSeconds: min, silences: out.map((x) => ({ start: r(x.start), end: r(x.end) })) }, null, 2));
+    console.log(JSON.stringify({ file: f, duration: info.duration, noiseDb: noise, minSeconds: min, silences: await silences(path.resolve(f), noise, min, info.duration) }, null, 2));
   },
 
   async render(args) {
